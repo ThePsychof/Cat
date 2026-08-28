@@ -10,7 +10,7 @@ The name is a nod to GitHub's Octocat — Octocat just sits there. Cat is the po
 
 1. **Provision a drive** with a single command from any machine with Node.js installed:
    ```
-   npx meow init /path/to/drive
+   npx miuu init /path/to/drive
    ```
    You'll be asked which OS(es) the drive should support (Windows / macOS / Linux / All). This downloads the matching portable git binary and Cat launcher for each selected OS onto the drive — no other install step, and nothing is installed on the host machine itself.
 

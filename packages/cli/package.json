@@ -1,9 +1,9 @@
 {
-  "name": "meow",
+  "name": "miuu",
   "version": "0.0.1",
   "private": true,
   "bin": {
-    "meow": "./dist/index.js"
+    "miuu": "./dist/index.js"
   },
   "type": "module",
   "scripts": {

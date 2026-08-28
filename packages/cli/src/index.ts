@@ -43,7 +43,7 @@ async function initCat(targetPath: string): Promise<void> {
 const program = new Command();
 
 program
-  .name("meow")
+  .name("miuu")
   .description("Provision a portable drive into a Cat environment");
 
 program
