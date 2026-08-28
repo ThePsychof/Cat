@@ -36,7 +36,6 @@
     },
     "win": {
       "target": "portable",
-      "artifactName": "Cat-Windows.exe",
       "icon": "build/icon.ico"
     },
     "mac": {
@@ -46,6 +45,9 @@
     "linux": {
       "target": "AppImage",
       "artifactName": "Cat-Linux.AppImage"
+    },
+    "portable": {
+      "artifactName": "Cat.exe"
     }
   }
 }

@@ -20,9 +20,13 @@ import { checkForUpdate, downloadUpdate, applyPendingUpdate } from "./update.js"
 const CURRENT_VERSION = "0.0.1";
 
 function createWindow(): void {
+  const driveLabel = path.parse(path.resolve(DRIVE_ROOT)).root.replace(/[\\/]$/, "") || DRIVE_ROOT;
+
   const win = new BrowserWindow({
     width: 1000,
     height: 700,
+    title: `Cat — ${driveLabel}`,
+    icon: path.join(__dirname, "..", "build", "icon.png"), // taskbar/alt-tab icon
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -35,12 +39,26 @@ function createWindow(): void {
 
 function resolveDriveRoot(): string {
   if (app.isPackaged) {
-    // Packaged launcher binary sits at the drive root itself,
-    // so the drive root is simply the folder containing the executable.
+    // electron-builder's Windows "portable" target self-extracts the app
+    // into a temp folder and runs it from there — app.getPath("exe") then
+    // points into TEMP, not onto the flash drive. That's why clones/pulls
+    // "succeeded" but never showed up on the drive: they were writing to a
+    // temp folder that gets wiped when the app closes.
+    //
+    // electron-builder sets PORTABLE_EXECUTABLE_DIR to the real folder the
+    // portable .exe was launched from — use that instead.
+    if (process.env.PORTABLE_EXECUTABLE_DIR) {
+      return process.env.PORTABLE_EXECUTABLE_DIR;
+    }
+    // Linux AppImage similarly mounts/runs from a temp mountpoint; APPIMAGE
+    // holds the real path to the .AppImage file itself.
+    if (process.env.APPIMAGE) {
+      return path.dirname(process.env.APPIMAGE);
+    }
+    // macOS .app bundles (and anything non-self-extracting) run in place,
+    // so this fallback is correct there.
     return path.dirname(app.getPath("exe"));
   }
-  // Dev mode: no packaged binary, so allow overriding via env var,
-  // falling back to a local ./dev-drive folder for testing.
   return process.env.CAT_DRIVE_ROOT ?? path.resolve(process.cwd(), "dev-drive");
 }
 

@@ -3,7 +3,16 @@
   "releaseTag": "v0.0.1",
   "assets": {
     "windows": {
-      "launcher": "Cat-Windows.exe"
+      "launcher": "Cat.exe",
+      "icon": "cat-icon.ico"
+    },
+    "macos": {
+      "launcher": "cat-launcher-macos.app.zip",
+      "icon": "cat-icon.ico"
+    },
+    "linux": {
+      "launcher": "cat-launcher-linux",
+      "icon": "cat-icon.ico"
     }
   }
 }

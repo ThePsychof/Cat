@@ -2,6 +2,7 @@ export type TargetOS = "windows" | "macos" | "linux";
 
 export interface OSAssetEntry {
   launcher: string; // asset filename for the launcher binary/archive
+  icon: string;      // asset filename for the drive icon (.ico), used by autorun.inf
 }
 
 export interface CatManifest {

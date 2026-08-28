@@ -1,4 +1,4 @@
-import { createWriteStream } from "node:fs";
+import { createWriteStream, existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -15,7 +15,9 @@ export async function downloadAsset(
     throw new Error(`Failed to download ${assetFilename}: ${res.status} ${res.statusText}`);
   }
 
-  await mkdir(destDir, { recursive: true });
+  if (!existsSync(destDir)) {
+    await mkdir(destDir, { recursive: true });
+  }
   const destPath = path.join(destDir, assetFilename);
 
   const nodeStream = Readable.fromWeb(res.body as any);

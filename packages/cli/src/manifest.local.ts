@@ -8,9 +8,9 @@ export function getLocalManifest(): CatManifest {
     version: "0.0.1-dev",
     releaseTag: "v0.0.1-dev",
     assets: {
-      windows: { launcher: "cat-launcher-windows.exe" },
-      macos: { launcher: "cat-launcher-macos.app.zip" },
-      linux: { launcher: "cat-launcher-linux" },
+      windows: { launcher: "Cat.exe", icon: "cat-icon.ico" },
+      macos: { launcher: "cat-launcher-macos.app.zip", icon: "cat-icon.ico" },
+      linux: { launcher: "cat-launcher-linux", icon: "cat-icon.ico" },
     },
   };
 }
