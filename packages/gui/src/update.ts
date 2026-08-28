@@ -83,11 +83,29 @@ export async function applyPendingUpdate(driveRoot: string): Promise<void> {
   const stagingPath = path.join(driveRoot, ".cat", STAGING_DIR);
   const stagedFile = path.join(stagingPath, pending.file);
   const destFile = path.join(driveRoot, pending.file);
+  const backupFile = `${destFile}.old`;
 
-  // Replace the launcher at the drive root with the staged version.
+  // A backup from a previous update apply may still be sitting here if it
+  // couldn't be deleted last run (its process hadn't fully exited yet).
+  // Safe to clean up now, a full relaunch later.
+  try {
+    await fs.unlink(backupFile);
+  } catch {
+    // fine if it doesn't exist
+  }
+
+  // destFile is the executable currently running this very code. Windows
+  // locks a running exe's content against being overwritten in place, but
+  // still allows renaming it (only the directory entry changes) — so we
+  // rename the old one out of the way, then move the staged build in.
+  try {
+    await fs.rename(destFile, backupFile);
+  } catch (err) {
+    throw new Error(`Could not replace running executable: ${(err as Error).message}`);
+  }
+
   await fs.copyFile(stagedFile, destFile);
 
-  // Clean up staging so this doesn't reapply on every launch.
   await fs.unlink(stagedFile);
   await fs.unlink(path.join(stagingPath, "pending.json"));
 }
