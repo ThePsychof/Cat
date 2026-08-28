@@ -5,6 +5,7 @@ export interface RepoEntry {
   name: string;
   remoteUrl: string;
   localPath: string; // relative to drive root
+  readOnly: boolean; // if true, commit/push are disabled for this repo
 }
 
 export interface GitProfile {

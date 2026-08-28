@@ -2,6 +2,17 @@ import fs from "node:fs";
 import path from "node:path";
 import git from "isomorphic-git";
 import http from "isomorphic-git/http/node";
+import { readState } from "./state.js";
+
+async function assertWritable(driveRoot: string, repoDir: string): Promise<void> {
+  const state = await readState(driveRoot);
+  const entry = state.repos.find((r) => r.localPath === repoDir);
+  if (entry?.readOnly) {
+    throw new Error(
+      `"${entry.name}" is set to read-only in Cat — commits and pushes are disabled for this repo.`
+    );
+  }
+}
 
 function onAuth(token?: string) {
   if (!token) return undefined;
@@ -47,6 +58,7 @@ export async function push(
   repoDir: string,
   token?: string
 ): Promise<string> {
+  await assertWritable(driveRoot, repoDir);
   const dir = path.join(driveRoot, repoDir);
   const result = await git.push({
     fs,
@@ -132,6 +144,7 @@ export async function commit(
   authorName: string,
   authorEmail: string
 ): Promise<string> {
+  await assertWritable(driveRoot, repoDir);
   const dir = path.join(driveRoot, repoDir);
   const sha = await git.commit({
     fs,

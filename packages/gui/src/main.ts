@@ -79,11 +79,38 @@ ipcMain.handle(
     remoteUrl: string,
     targetDir: string,
     profileName?: string,
-    passphrase?: string
+    passphrase?: string,
+    readOnly = false
   ) => {
     const token =
       profileName && passphrase ? await getToken(DRIVE_ROOT, profileName, passphrase) : null;
     await cloneRepo(DRIVE_ROOT, remoteUrl, targetDir, token ?? undefined);
+
+    // Persist read-only status right here, at the source of truth, rather
+    // than relying on the renderer to separately call cat:saveState with
+    // the right shape — this way assertWritable() in git.ts always sees it.
+    const state = await readState(DRIVE_ROOT);
+    const name = targetDir.split(/[\\/]/).pop() ?? targetDir;
+    const existing = state.repos.find((r) => r.localPath === targetDir);
+    if (existing) {
+      existing.readOnly = readOnly;
+      existing.remoteUrl = remoteUrl;
+    } else {
+      state.repos.push({ name, remoteUrl, localPath: targetDir, readOnly });
+    }
+    await writeState(DRIVE_ROOT, state);
+  }
+);
+
+ipcMain.handle(
+  "cat:setRepoReadOnly",
+  async (_event, repoDir: string, readOnly: boolean) => {
+    const state = await readState(DRIVE_ROOT);
+    const entry = state.repos.find((r) => r.localPath === repoDir);
+    if (entry) {
+      entry.readOnly = readOnly;
+      await writeState(DRIVE_ROOT, state);
+    }
   }
 );
 

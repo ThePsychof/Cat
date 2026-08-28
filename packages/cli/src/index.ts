@@ -4,6 +4,7 @@ import * as readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { provisionCat } from "./provision.js";
 import type { TargetOS } from "./manifest.js";
+import { CatSpinner } from "./spinner.js";
 
 const ALL_OS: TargetOS[] = ["windows", "macos", "linux"];
 
@@ -33,17 +34,23 @@ async function promptForOS(): Promise<TargetOS[]> {
 }
 
 async function initCat(targetPath: string): Promise<void> {
-  console.log(`Initializing Cat at: ${targetPath}`);
-  const selectedOS = await promptForOS();
-  console.log(`Selected OS target(s): ${selectedOS.join(", ")}`);
+  const selectedOS = await promptForOS(); // readline prompt runs before the spinner takes the line over
 
-  await provisionCat(targetPath, selectedOS);
+  const spinner = new CatSpinner();
+  spinner.start(`Initializing Cat at: ${targetPath}`);
+  try {
+    await provisionCat(targetPath, selectedOS, spinner);
+    spinner.succeed(`Cat is ready at ${targetPath}!`);
+  } catch (err) {
+    spinner.fail(`Something went wrong: ${(err as Error).message}`);
+    process.exitCode = 1;
+  }
 }
 
 const program = new Command();
 
 program
-  .name("miuu")
+  .name("mewmew")
   .description("Provision a portable drive into a Cat environment");
 
 program
