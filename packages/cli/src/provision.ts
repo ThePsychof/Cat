@@ -5,7 +5,7 @@ import { writeAutorun, setVolumeLabel } from "./autorun.js";
 import type { CatSpinner } from "./spinner.js";
 
 const CAT_HIDDEN_DIR = ".cat";
-const VOLUME_LABEL = "Cat Drive";
+const VOLUME_LABEL = "Cat";
 
 export async function provisionCat(
   targetPath: string,

@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
 
-const AUTORUN_ICON_REL = path.join(".cat", "icon.ico");
+const AUTORUN_ICON_REL = path.join(".cat", "cat-icon.ico");
 
 export async function writeAutorun(driveRoot: string, volumeLabel: string): Promise<void> {
   const autorunContent = [
