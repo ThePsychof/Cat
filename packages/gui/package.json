@@ -1,0 +1,51 @@
+{
+  "name": "cat-gui",
+  "version": "0.0.1",
+  "description": "Cat — a portable GitHub development environment",
+  "author": "ThePsychof",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "npm run build && electron .",
+    "package:win": "npm run build && electron-builder --win portable",
+    "package:mac": "npm run build && electron-builder --mac zip",
+    "package:linux": "npm run build && electron-builder --linux AppImage"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "isomorphic-git": "^1.32.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^24.0.0",
+    "electron": "41.10.7",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.thepsychof.cat",
+    "productName": "Cat",
+    "files": [
+      "dist/**/*",
+      "renderer/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "portable",
+      "artifactName": "Cat-Windows.exe",
+      "icon": "build/icon.ico"
+    },
+    "mac": {
+      "target": "zip",
+      "artifactName": "Cat-macOS.zip"
+    },
+    "linux": {
+      "target": "AppImage",
+      "artifactName": "Cat-Linux.AppImage"
+    }
+  }
+}
