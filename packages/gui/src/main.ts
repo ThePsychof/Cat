@@ -17,7 +17,7 @@ import {
 import { getToken, setToken } from "./credentials.js";
 import { checkForUpdate, downloadUpdate, applyPendingUpdate } from "./update.js";
 
-const CURRENT_VERSION = "0.0.1";
+const CURRENT_VERSION = app.getVersion();
 
 function createWindow(): void {
   const driveLabel = path.parse(path.resolve(DRIVE_ROOT)).root.replace(/[\\/]$/, "") || DRIVE_ROOT;
@@ -138,6 +138,8 @@ ipcMain.handle(
     return push(DRIVE_ROOT, repoDir, token ?? undefined);
   }
 );
+
+ipcMain.handle("cat:getVersion", () => app.getVersion());
 
 ipcMain.handle(
   "cat:setRepoIdentity",

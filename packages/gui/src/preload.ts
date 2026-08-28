@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("cat", {
-  version: "0.0.1",
+  version: () => ipcRenderer.invoke("cat:getVersion"),
   getState: () => ipcRenderer.invoke("cat:getState"),
   saveState: (state: unknown) => ipcRenderer.invoke("cat:saveState", state),
   cloneRepo: (remoteUrl: string, targetDir: string, profileName?: string, passphrase?: string) =>
