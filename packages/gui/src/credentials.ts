@@ -1,75 +1,109 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
-import crypto from "node:crypto";
+// Swapped from Node's scrypt (unavailable outside Node) to Web Crypto's
+// PBKDF2 — the browser-native equivalent, now that this runs in a real
+// webview context instead of Electron's Node-backed main process.
+// Iteration count follows OWASP's 2023 Password Storage Cheat Sheet
+// guidance for PBKDF2-HMAC-SHA256 (600,000+).
+
+import { filesystem } from "@neutralinojs/lib";
+import { joinPath, ensureDir } from "./neutralino-paths.js";
 
 export interface CredentialStore {
   tokens: Record<string, string>;
 }
 
 interface EncryptedBlob {
-  salt: string;    // hex
-  iv: string;      // hex
-  authTag: string; // hex
-  data: string;    // hex (ciphertext)
+  salt: string;
+  iv: string;
+  data: string; // ciphertext, with AES-GCM's auth tag already appended by SubtleCrypto
 }
 
 const CREDENTIALS_FILENAME = "credentials.enc.json";
-const SCRYPT_KEYLEN = 32;
+const PBKDF2_ITERATIONS = 600_000;
 
 function credentialsPath(driveRoot: string): string {
-  return path.join(driveRoot, ".cat", CREDENTIALS_FILENAME);
+  return joinPath(driveRoot, ".cat", CREDENTIALS_FILENAME);
 }
 
-function deriveKey(passphrase: string, salt: Buffer): Buffer {
-  return crypto.scryptSync(passphrase, salt, SCRYPT_KEYLEN);
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function encrypt(plaintext: string, passphrase: string): EncryptedBlob {
-  const salt = crypto.randomBytes(16);
-  const key = deriveKey(passphrase, salt);
-  const iv = crypto.randomBytes(12);
+function hexToBytes(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+  }
+  return bytes;
+}
 
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-  const encrypted = Buffer.concat([cipher.update(plaintext, "utf-8"), cipher.final()]);
-  const authTag = cipher.getAuthTag();
+async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKey> {
+  const baseKey = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(passphrase),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: salt as BufferSource, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
+    baseKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+async function encrypt(plaintext: string, passphrase: string): Promise<EncryptedBlob> {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveKey(passphrase, salt);
+
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: iv as BufferSource },
+    key,
+    new TextEncoder().encode(plaintext)
+  );
 
   return {
-    salt: salt.toString("hex"),
-    iv: iv.toString("hex"),
-    authTag: authTag.toString("hex"),
-    data: encrypted.toString("hex"),
+    salt: bytesToHex(salt),
+    iv: bytesToHex(iv),
+    data: bytesToHex(new Uint8Array(ciphertext)),
   };
 }
 
-function decrypt(blob: EncryptedBlob, passphrase: string): string {
-  const salt = Buffer.from(blob.salt, "hex");
-  const key = deriveKey(passphrase, salt);
-  const iv = Buffer.from(blob.iv, "hex");
-  const authTag = Buffer.from(blob.authTag, "hex");
-  const data = Buffer.from(blob.data, "hex");
+async function decrypt(blob: EncryptedBlob, passphrase: string): Promise<string> {
+  const salt = hexToBytes(blob.salt);
+  const iv = hexToBytes(blob.iv);
+  const data = hexToBytes(blob.data);
+  const key = await deriveKey(passphrase, salt);
 
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-  decipher.setAuthTag(authTag);
-
-  const decrypted = Buffer.concat([decipher.update(data), decipher.final()]);
-  return decrypted.toString("utf-8");
+  try {
+    const plaintext = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: iv as BufferSource },
+      key,
+      data as BufferSource
+    );
+    return new TextDecoder().decode(plaintext);
+  } catch {
+    throw new Error("Failed to decrypt credentials — wrong passphrase or corrupted file.");
+  }
 }
 
 export async function readCredentials(
   driveRoot: string,
   passphrase: string
 ): Promise<CredentialStore> {
+  const p = credentialsPath(driveRoot);
   try {
-    const raw = await fs.readFile(credentialsPath(driveRoot), "utf-8");
+    const raw = await filesystem.readFile(p);
     const blob = JSON.parse(raw) as EncryptedBlob;
-    const plaintext = decrypt(blob, passphrase);
+    const plaintext = await decrypt(blob, passphrase);
     return JSON.parse(plaintext) as CredentialStore;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      return { tokens: {} };
+    if (err instanceof Error && err.message.includes("decrypt")) {
+      throw err;
     }
-    // Wrong passphrase (auth tag mismatch) or corrupt file both land here.
-    throw new Error("Failed to decrypt credentials — wrong passphrase or corrupted file.");
+    return { tokens: {} };
   }
 }
 
@@ -79,9 +113,9 @@ export async function writeCredentials(
   passphrase: string
 ): Promise<void> {
   const p = credentialsPath(driveRoot);
-  await fs.mkdir(path.dirname(p), { recursive: true });
-  const blob = encrypt(JSON.stringify(store), passphrase);
-  await fs.writeFile(p, JSON.stringify(blob, null, 2), "utf-8");
+  await ensureDir(joinPath(driveRoot, ".cat"));
+  const blob = await encrypt(JSON.stringify(store), passphrase);
+  await filesystem.writeFile(p, JSON.stringify(blob, null, 2));
 }
 
 export async function setToken(

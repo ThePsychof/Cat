@@ -472,6 +472,9 @@ async function checkForUpdate({ silent } = { silent: false }) {
 
 checkUpdateBtn.addEventListener("click", () => checkForUpdate({ silent: false }));
 
-document.title = "Cat v" + window.cat.version;
-loadState();
-checkForUpdate({ silent: true }); // quiet check on launch, no popup if already current
+document.addEventListener("cat-ready", async () => {
+  const v = await window.cat.version();
+  document.title = "Cat v" + v;
+  loadState();
+  checkForUpdate({ silent: true }); // quiet check on launch, no popup if already current
+});

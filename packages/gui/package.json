@@ -1,53 +1,27 @@
 {
   "name": "cat-gui",
   "version": "0.0.2",
-  "description": "Cat — a portable GitHub development environment",
+  "description": "Cat — A Portable Live GitHub Backup",
   "author": "ThePsychof",
   "private": true,
-  "main": "dist/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "start": "npm run build && electron .",
-    "package:win": "npm run build && electron-builder --win portable",
-    "package:mac": "npm run build && electron-builder --mac zip",
-    "package:linux": "npm run build && electron-builder --linux AppImage"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "npm run typecheck && esbuild src/app-entry.ts --bundle --outfile=resources/js/bundle.js --format=iife --target=es2020",
+    "start": "npm run build && neu run",
+    "package:win": "npm run build && neu build --release",
+    "package:mac": "npm run build && neu build --release",
+    "package:linux": "npm run build && neu build --release"
   },
   "engines": {
     "node": ">=22.0.0"
   },
   "dependencies": {
+    "@neutralinojs/lib": "^6.9.0",
     "isomorphic-git": "^1.32.0"
   },
   "devDependencies": {
+    "@neutralinojs/neu": "^11.0.0",
     "typescript": "^5.7.0",
-    "@types/node": "^24.0.0",
-    "electron": "41.10.7",
-    "electron-builder": "^26.0.0"
-  },
-  "build": {
-    "appId": "com.thepsychof.cat",
-    "productName": "Cat",
-    "files": [
-      "dist/**/*",
-      "renderer/**/*"
-    ],
-    "directories": {
-      "output": "release"
-    },
-    "win": {
-      "target": "portable",
-      "icon": "build/icon.ico"
-    },
-    "mac": {
-      "target": "zip",
-      "artifactName": "Cat-macOS.zip"
-    },
-    "linux": {
-      "target": "AppImage",
-      "artifactName": "Cat-Linux.AppImage"
-    },
-    "portable": {
-      "artifactName": "Cat.exe"
-    }
+    "esbuild": "^0.24.0"
   }
 }
