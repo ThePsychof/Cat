@@ -14,3 +14,4 @@ path = "src/main.rs"
 
 [dependencies]
 cat-core = { path = "../core" }
+eframe = { version = "0.36.1", default-features = false, features = ["glow", "default_fonts", "persistence"] }

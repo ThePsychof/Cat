@@ -82,7 +82,8 @@ fn provision(drive: &Path, mode: &str, cat_binary: Option<&Path>) -> Result<(), 
     fs::create_dir_all(&profiles).map_err(|e| format!("cannot create profiles: {e}"))?;
     fs::create_dir_all(&metadata).map_err(|e| format!("cannot create metadata: {e}"))?;
     install_git(&metadata)?;
-    install_cat(drive, cat_binary)?;
+    install_cat(drive, cat_binary.as_deref())?;
+    install_icon(&metadata)?;
     let state = DriveState {
         version: env!("CARGO_PKG_VERSION"),
         selected_os: vec!["windows"],
@@ -101,6 +102,13 @@ fn provision(drive: &Path, mode: &str, cat_binary: Option<&Path>) -> Result<(), 
     .map_err(|e| format!("cannot write autorun.inf: {e}"))?;
     println!("Cat drive prepared in {mode} mode: {}", drive.display());
     Ok(())
+}
+
+const CAT_ICON: &[u8] = include_bytes!("../../../cat-icon.ico");
+
+fn install_icon(metadata: &Path) -> Result<(), String> {
+    fs::write(metadata.join("cat-icon.ico"), CAT_ICON)
+        .map_err(|e| format!("cannot write cat-icon.ico: {e}"))
 }
 
 fn install_cat(drive: &Path, requested: Option<&Path>) -> Result<(), String> {

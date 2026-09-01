@@ -5,6 +5,9 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
+mod credentials;
+pub use credentials::{get_token, read_credentials, set_token, write_credentials, CredentialStore};
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RepoSyncState {
     UpToDate,
