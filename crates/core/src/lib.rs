@@ -91,7 +91,9 @@ fn scan_for_repositories(
         return Ok(());
     }
 
-    let canonical = dir.canonicalize().map_err(|e| format!("Failed to canonicalize {}: {e}", dir.display()))?;
+    let canonical = dir
+        .canonicalize()
+        .map_err(|e| format!("Failed to canonicalize {}: {e}", dir.display()))?;
     if !visited.insert(canonical.clone()) {
         return Ok(());
     }
@@ -105,8 +107,11 @@ fn scan_for_repositories(
         return Ok(());
     }
 
-    for entry in fs::read_dir(dir).map_err(|e| format!("Failed to read directory {}: {e}", dir.display()))? {
-        let entry = entry.map_err(|e| format!("Failed to read directory entry in {}: {e}", dir.display()))?;
+    for entry in
+        fs::read_dir(dir).map_err(|e| format!("Failed to read directory {}: {e}", dir.display()))?
+    {
+        let entry = entry
+            .map_err(|e| format!("Failed to read directory entry in {}: {e}", dir.display()))?;
         let path = entry.path();
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
@@ -143,7 +148,9 @@ pub fn inspect_repository(repo_dir: &Path) -> Result<RepositoryRecord, String> {
         local_path: repo_dir.to_string_lossy().to_string(),
         read_only: false,
         last_synced_at: None,
-        last_synced_sha: git_output(repo_dir, &["rev-parse", "HEAD"]).ok().map(|s| s.trim().to_string()),
+        last_synced_sha: git_output(repo_dir, &["rev-parse", "HEAD"])
+            .ok()
+            .map(|s| s.trim().to_string()),
         size_bytes,
         sync_state,
     })
@@ -158,7 +165,11 @@ pub fn evaluate_repository_state(repo_dir: &Path) -> Result<RepoSyncState, Strin
         return Ok(RepoSyncState::UpToDate);
     }
 
-    if text.contains("Unmerged") || text.contains("UU ") || text.contains("AA ") || text.contains("DD ") {
+    if text.contains("Unmerged")
+        || text.contains("UU ")
+        || text.contains("AA ")
+        || text.contains("DD ")
+    {
         return Ok(RepoSyncState::Conflicted);
     }
 
@@ -172,7 +183,13 @@ pub fn evaluate_repository_state(repo_dir: &Path) -> Result<RepoSyncState, Strin
         return Ok(RepoSyncState::Behind);
     }
 
-    if text.contains("??") || text.contains(" M") || text.contains("M ") || text.contains("A ") || text.contains("D ") || text.contains("R ") {
+    if text.contains("??")
+        || text.contains(" M")
+        || text.contains("M ")
+        || text.contains("A ")
+        || text.contains("D ")
+        || text.contains("R ")
+    {
         return Ok(RepoSyncState::Modified);
     }
 
@@ -202,7 +219,8 @@ fn directory_size(path: &Path) -> Result<u64, std::io::Error> {
 }
 
 fn git_output(repo_dir: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
+    let git = git_program(repo_dir)?;
+    let output = Command::new(git)
         .current_dir(repo_dir)
         .args(args)
         .output()
@@ -213,6 +231,28 @@ fn git_output(repo_dir: &Path, args: &[&str]) -> Result<String, String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn git_program(repo_dir: &Path) -> Result<PathBuf, String> {
+    let mut current = Some(repo_dir);
+    while let Some(path) = current {
+        let candidate =
+            path.join(".cat")
+                .join("tools")
+                .join(if cfg!(windows) { "git.exe" } else { "git" });
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+        current = path.parent();
+    }
+    #[cfg(test)]
+    {
+        return Ok(PathBuf::from("git"));
+    }
+    #[cfg(not(test))]
+    {
+        Err("Portable Git is missing from the Cat drive (.cat/tools/git)".into())
+    }
 }
 
 pub struct SyncProgress {
@@ -237,7 +277,8 @@ pub fn push_repository(repo_dir: &Path, remote: &str, branch: &str) -> Result<()
 }
 
 pub fn clone_repository(url: &str, target_dir: &Path) -> Result<(), String> {
-    let output = Command::new("git")
+    let git = git_program(target_dir.parent().unwrap_or(target_dir))?;
+    let output = Command::new(git)
         .arg("clone")
         .arg(url)
         .arg(target_dir)
@@ -259,10 +300,16 @@ pub fn get_remote_url(repo_dir: &Path, remote: &str) -> Result<String, String> {
     git_output(repo_dir, &["remote", "get-url", remote]).map(|s| s.trim().to_string())
 }
 
-pub fn compare_with_remote(repo_dir: &Path, remote: &str, branch: &str) -> Result<(u32, u32), String> {
-    let local_head = git_output(repo_dir, &["rev-parse", "HEAD"])?.trim().to_string();
+pub fn compare_with_remote(
+    repo_dir: &Path,
+    remote: &str,
+    branch: &str,
+) -> Result<(u32, u32), String> {
+    let local_head = git_output(repo_dir, &["rev-parse", "HEAD"])?
+        .trim()
+        .to_string();
     let remote_ref = format!("{}/{}", remote, branch);
-    
+
     let remote_head = match git_output(repo_dir, &["rev-parse", &remote_ref]) {
         Ok(s) => s.trim().to_string(),
         Err(_) => return Ok((0, 0)),
@@ -272,10 +319,16 @@ pub fn compare_with_remote(repo_dir: &Path, remote: &str, branch: &str) -> Resul
         return Ok((0, 0));
     }
 
-    let ahead_output = git_output(repo_dir, &["rev-list", "--count", &format!("{}..HEAD", remote_ref)])?;
+    let ahead_output = git_output(
+        repo_dir,
+        &["rev-list", "--count", &format!("{}..HEAD", remote_ref)],
+    )?;
     let ahead: u32 = ahead_output.trim().parse().unwrap_or(0);
 
-    let behind_output = git_output(repo_dir, &["rev-list", "--count", &format!("HEAD..{}", remote_ref)])?;
+    let behind_output = git_output(
+        repo_dir,
+        &["rev-list", "--count", &format!("HEAD..{}", remote_ref)],
+    )?;
     let behind: u32 = behind_output.trim().parse().unwrap_or(0);
 
     Ok((ahead, behind))
@@ -325,6 +378,31 @@ pub fn create_branch(repo_dir: &Path, branch_name: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub fn stage_all_changes(repo_dir: &Path) -> Result<(), String> {
+    git_output(repo_dir, &["add", "-A"])?;
+    Ok(())
+}
+
+pub fn commit_changes(
+    repo_dir: &Path,
+    message: &str,
+    author_name: &str,
+    author_email: &str,
+) -> Result<String, String> {
+    git_output(repo_dir, &["config", "user.name", author_name])?;
+    git_output(repo_dir, &["config", "user.email", author_email])?;
+    let output = git_output(repo_dir, &["commit", "-m", message])?;
+    Ok(output.trim().to_string())
+}
+
+pub fn open_in_editor(repo_dir: &Path, editor: &str) -> Result<(), String> {
+    Command::new(editor)
+        .arg(repo_dir)
+        .spawn()
+        .map_err(|e| format!("Failed to open {} in {}: {e}", repo_dir.display(), editor))?;
+    Ok(())
+}
+
 pub fn clone_from_drive(source_repo_path: &Path, target_dir: &Path) -> Result<(), String> {
     let source_path = source_repo_path
         .canonicalize()
@@ -332,15 +410,22 @@ pub fn clone_from_drive(source_repo_path: &Path, target_dir: &Path) -> Result<()
         .to_string_lossy()
         .to_string();
 
-    clone_repository(&source_path, target_dir)
+    let git = git_program(source_repo_path)?;
+    let output = Command::new(git)
+        .arg("clone")
+        .arg(&source_path)
+        .arg(target_dir)
+        .output()
+        .map_err(|e| format!("Unable to clone from {}: {e}", source_repo_path.display()))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(())
 }
 
 pub fn list_files(repo_dir: &Path) -> Result<Vec<String>, String> {
     let output = git_output(repo_dir, &["ls-tree", "-r", "--name-only", "HEAD"])?;
-    Ok(output
-        .lines()
-        .map(|line| line.to_string())
-        .collect())
+    Ok(output.lines().map(|line| line.to_string()).collect())
 }
 
 pub fn get_commit_log(repo_dir: &Path, max_count: usize) -> Result<Vec<CommitInfo>, String> {
@@ -383,16 +468,16 @@ pub fn get_commit_log(repo_dir: &Path, max_count: usize) -> Result<Vec<CommitInf
 
 pub fn get_file_status(repo_dir: &Path) -> Result<Vec<FileStatus>, String> {
     let output = git_output(repo_dir, &["status", "--porcelain"])?;
-    
+
     let mut statuses = Vec::new();
     for line in output.lines() {
         if line.len() < 3 {
             continue;
         }
-        
+
         let status_code = &line[0..2];
         let filepath = line[3..].to_string();
-        
+
         let status = match status_code {
             "M " => "modified",
             "A " => "added",
@@ -403,23 +488,23 @@ pub fn get_file_status(repo_dir: &Path) -> Result<Vec<FileStatus>, String> {
             "??" => "untracked",
             _ => "unknown",
         };
-        
+
         statuses.push(FileStatus {
             path: filepath,
             status: status.to_string(),
         });
     }
-    
+
     Ok(statuses)
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FileStatus {
     pub path: String,
     pub status: String,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CommitInfo {
     pub sha: String,
     pub author: String,
@@ -428,9 +513,41 @@ pub struct CommitInfo {
     pub message: String,
 }
 
+pub fn drive_state_path(drive_root: &Path) -> PathBuf {
+    drive_root.join(".cat").join("state.json")
+}
+
+pub fn load_drive_state(drive_root: &Path) -> Result<DriveState, String> {
+    let path = drive_state_path(drive_root);
+    if !path.exists() {
+        return Ok(DriveState::new());
+    }
+    let raw =
+        fs::read_to_string(&path).map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
+    serde_json::from_str(&raw).map_err(|e| format!("Failed to parse {}: {e}", path.display()))
+}
+
+pub fn save_drive_state(drive_root: &Path, state: &DriveState) -> Result<(), String> {
+    let path = drive_state_path(drive_root);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create {}: {e}", parent.display()))?;
+    }
+    let raw = serde_json::to_string_pretty(state)
+        .map_err(|e| format!("Failed to encode drive state: {e}"))?;
+    fs::write(&path, raw).map_err(|e| format!("Failed to write {}: {e}", path.display()))
+}
+
+pub fn compare_files(repo_dir: &Path) -> Result<Vec<FileStatus>, String> {
+    get_file_status(repo_dir)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{discover_repositories, DriveState, GitProfile, RepoSyncState, RepositoryRecord};
+    use super::{
+        DriveState, GitProfile, RepoSyncState, RepositoryRecord, commit_changes,
+        discover_repositories, get_commit_log, get_file_status, stage_all_changes,
+    };
     use std::fs;
     use std::path::PathBuf;
     use std::process::Command;
@@ -521,5 +638,23 @@ mod tests {
         assert_eq!(discovered.len(), 1);
         assert_eq!(discovered[0].local_path, repo.to_string_lossy().to_string());
         assert_eq!(discovered[0].name, "demo-repo");
+    }
+
+    #[test]
+    fn can_stage_and_commit_changes_for_a_repo() {
+        let base = unique_temp_dir("stage-commit");
+        let repo = init_git_repo(&base, "change-tracker");
+
+        let readme = repo.join("README.md");
+        std::fs::write(&readme, "hello from Cat\n").unwrap();
+
+        stage_all_changes(&repo).unwrap();
+        let commit_output =
+            commit_changes(&repo, "chore: add README", "Cat Test", "cat@example.com").unwrap();
+
+        assert!(commit_output.contains("[main"));
+        assert!(get_file_status(&repo).unwrap().is_empty());
+        let log = get_commit_log(&repo, 5).unwrap();
+        assert_eq!(log[0].message, "chore: add README");
     }
 }

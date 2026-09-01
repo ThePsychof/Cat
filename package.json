@@ -1,26 +1,8 @@
 {
-  "name": "cat-monorepo",
+  "name": "cat-rust",
   "private": true,
-  "workspaces": [
-    "packages/*"
-  ],
   "scripts": {
-    "build": "npm run build --workspace @cat/shared && npm run build --workspace mewmew && npm run build --workspace cat-gui",
-    "clean": "npm run clean --workspaces --if-present"
-  },
-  "engines": {
-    "node": ">=22.0.0"
-  },
-  "devDependencies": {
-    "typescript": "^5.7.0",
-    "@types/node": "^24.0.0"
-  },
-  "allowScripts": {
-    "electron@41.10.7": true,
-    "electron-winstaller@5.4.0": true,
-    "bufferutil@4.1.0": true,
-    "es5-ext@0.10.64": true,
-    "utf-8-validate@5.0.10": true,
-    "esbuild@0.28.2": true
+    "build": "cargo build --workspace",
+    "test": "cargo test --workspace"
   }
 }

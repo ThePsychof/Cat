@@ -1,16 +1,13 @@
 [package]
-name = "cat-gui"
+name = "mewmew"
 version = "0.0.4"
 edition = "2024"
 license = "GPL-3.0"
 
-[lib]
-name = "cat_gui"
-path = "src/lib.rs"
-
 [[bin]]
-name = "cat"
+name = "mewmew"
 path = "src/main.rs"
 
 [dependencies]
-cat-core = { path = "../core" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

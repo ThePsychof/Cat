@@ -1,8 +1,8 @@
 [package]
 name = "cat-core"
-version = "0.0.3"
-edition = "2021"
-license = "MIT"
+version = "0.0.4"
+edition = "2024"
+license = "GPL-3.0"
 
 [lib]
 name = "cat_core"

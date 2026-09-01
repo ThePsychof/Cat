@@ -3,15 +3,8 @@
 version = 4
 
 [[package]]
-name = "cat-cli"
-version = "0.0.3"
-dependencies = [
- "cat-core",
-]
-
-[[package]]
 name = "cat-core"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -19,7 +12,7 @@ dependencies = [
 
 [[package]]
 name = "cat-gui"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "cat-core",
 ]
@@ -35,6 +28,14 @@ name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
+
+[[package]]
+name = "mewmew"
+version = "0.0.4"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "proc-macro2"

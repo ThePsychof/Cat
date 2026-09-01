@@ -8,29 +8,14 @@ The user plugs the drive into a computer, opens Cat, sees their repositories in 
 
 Cat is the interface between three durable concepts:
 
-- the portable drive that stores the repositories and Cat metadata
-- GitHub as the remote counterpart
-- the host PC as a temporary runtime for launching Cat and optional external editors
 
 The full experience is:
 
-- browse repositories like a GitHub code view
-- inspect branches, commits, metadata, and remote state
-- compare local and remote repository status
-- pull, push, fetch, and synchronize
-- clone from GitHub to the drive or from the drive to the PC
-- open repositories directly in VS Code or another external editor without forcing a clone first
-- keep Cat-specific state entirely on the removable drive whenever possible
 
 ## The flash drive is Cat's home
 
 Cat is intentionally designed around a zero-install host model:
 
-- no system-wide installation
-- no global runtimes required on the host
-- no admin privileges required
-- no permanent application footprint on the host PC
-- no forced dependency on Node, Python, Git, Rust, or other host-side tooling
 
 The drive contains the Cat environment itself. The host merely runs it.
 
@@ -63,20 +48,11 @@ This repo is in migration from the earlier TypeScript/Electron prototype toward 
 
 ## Current project layout
 
-- crates/core — domain model, drive metadata, repository status concepts
-- crates/cli — command-line interface for provisioning and basic drive operations
-- crates/gui — UI layer placeholder for the eventual lightweight native interface
-- docs/architecture.md — product and architecture planning document
 
 ## Product personality
 
 Cat is intentionally:
 
-- GitHub-inspired for repository browsing
-- developer-first and information-heavy
-- practical and lightweight
-- portable by design
-- affectionate but not cartoonish, with an orange-cat personality used carefully in loading, empty states, and operational feedback
 
 It is not a full GitHub clone, an IDE, a file manager, or a social platform.
 
@@ -88,36 +64,32 @@ The migration has begun. The Rust workspace and foundational models are in place
 
 ### Creating a Cat Drive
 
-`mewmew` is publicly available on the npm registry. Users do not need to manually download, install, or obtain the package beforehand. They simply open a terminal on their PC and run:
+The intended workflow is: a normal PC runs `npx mewmew init` against a USB drive, and that drive becomes a self-contained Cat environment. The host machine is only a temporary bootstrap environment; the flash drive is where Cat lives.
 
 ```bash
-npx mewmew init
+npx mewmew init /path/to/flash-drive
 ```
 
-`npx` automatically obtains the published `mewmew` CLI when needed and runs the drive initialization process. The CLI then lets the user select the target flash drive and choose:
-
-- Format
-- Update
-- Append
+`npx` fetches the published `mewmew` CLI automatically, then prepares the selected drive. The CLI allows the user to choose a drive and a mode:
 
 #### Format
 
-Creates a fresh Cat drive from scratch.
+Creates a fresh Cat drive from scratch. This is the cleanest path for a new portable Cat environment.
 
 #### Update
 
-Updates Cat on an existing Cat drive while preserving its repositories and user data.
+Updates Cat on an existing Cat drive while preserving repositories, profiles, and user data.
 
 #### Append
 
-Adds Cat to an existing drive without destroying unrelated existing files.
+Adds Cat to an existing drive without destroying unrelated files already on that drive.
 
 The complete flow is:
 
 ```text
 Any PC
   ↓
-  npx mewmew init
+  npx mewmew init /path/to/drive
   ↓
 Mewmew downloads/runs automatically
   ↓
@@ -127,8 +99,15 @@ Select flash drive
 ├── Update
 └── Append
   ↓
-🐈 CAT DRIVE
+🐈 Portable Cat drive
 ```
+
+A prepared drive may be either:
+
+- fresh: a new, empty Cat environment
+- full: an existing drive that already contains repositories, profiles, and Cat state
+
+Either form is portable. Once the drive has been initialized, Cat is meant to live on it independently. The host PC does not become Cat's home.
 
 There is no separate package-download step for the user. `mewmew` is public on npm and `npx` is the entry point. Once the drive has been prepared, `mewmew` is not required for normal Cat usage.
 
@@ -210,15 +189,6 @@ Cat is designed to be used on computers that may not belong to the user. Cat sho
 
 Do not require:
 
-- Node.js
-- npm
-- Rust
-- Git
-- Python
-- .NET
-- administrator privileges
-- Cat installation
-- system-wide configuration
 
 Cat's application data, configuration, cache, and persistent state should live on the Cat drive whenever technically practical. The goal is:
 

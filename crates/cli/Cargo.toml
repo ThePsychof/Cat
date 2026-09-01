@@ -1,8 +1,0 @@
-[package]
-name = "cat-cli"
-version = "0.0.3"
-edition = "2021"
-license = "MIT"
-
-[dependencies]
-cat-core = { path = "../core" }
