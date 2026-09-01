@@ -9,11 +9,20 @@ function onAuth(token?: string) {
   return () => ({ username: token, password: "x-oauth-basic" });
 }
 
+export interface ProgressEvent {
+  phase: string;
+  loaded: number;
+  total?: number;
+}
+
+export type ProgressCallback = (event: ProgressEvent) => void;
+
 export async function cloneRepo(
   driveRoot: string,
   remoteUrl: string,
   targetDir: string,
-  token?: string
+  token?: string,
+  onProgress?: ProgressCallback
 ): Promise<void> {
   const dir = `${driveRoot}/${targetDir}`;
   await git.clone({
@@ -22,7 +31,11 @@ export async function cloneRepo(
     dir,
     url: remoteUrl,
     corsProxy: undefined,
+    singleBranch: false, // backup tool: capture all branches, not just the default
     onAuth: onAuth(token),
+    onProgress: onProgress
+      ? (e) => onProgress({ phase: e.phase, loaded: e.loaded, total: e.total })
+      : undefined,
   });
 }
 
@@ -31,7 +44,8 @@ export async function pull(
   repoDir: string,
   authorName: string,
   authorEmail: string,
-  token?: string
+  token?: string,
+  onProgress?: ProgressCallback
 ): Promise<string> {
   const dir = `${driveRoot}/${repoDir}`;
   await git.pull({
@@ -40,6 +54,9 @@ export async function pull(
     dir,
     author: { name: authorName, email: authorEmail },
     onAuth: onAuth(token),
+    onProgress: onProgress
+      ? (e) => onProgress({ phase: e.phase, loaded: e.loaded, total: e.total })
+      : undefined,
   });
   return "Pull complete.";
 }
@@ -104,6 +121,32 @@ export async function getChangedFiles(
     .filter((change: FileChange) => change.status !== "unmodified");
 }
 
+export async function listFiles(driveRoot: string, repoDir: string): Promise<string[]> {
+  const dir = `${driveRoot}/${repoDir}`;
+  const files = await git.listFiles({ fs, dir });
+  return files;
+}
+
+export async function getCommitLog(
+  driveRoot: string,
+  repoDir: string,
+  maxCount = 20
+): Promise<Array<{ sha: string; author: string; email: string; date: string; message: string }>> {
+  const dir = `${driveRoot}/${repoDir}`;
+  const entries = await git.log({ fs, dir, depth: maxCount });
+  return entries.map((entry) => {
+    const ts = entry.commit.author.timestamp;
+    const date = new Date(ts * 1000).toISOString();
+    return {
+      sha: entry.oid,
+      author: entry.commit.author.name,
+      email: entry.commit.author.email,
+      date,
+      message: entry.commit.message,
+    };
+  });
+}
+
 export async function stageAll(driveRoot: string, repoDir: string): Promise<void> {
   const changes = await getChangedFiles(driveRoot, repoDir);
   const dir = `${driveRoot}/${repoDir}`;
@@ -145,6 +188,15 @@ export async function getCurrentBranch(
   const dir = `${driveRoot}/${repoDir}`;
   const branch = await git.currentBranch({ fs, dir, fullname: false });
   return branch ?? undefined;
+}
+
+export async function getHeadSha(driveRoot: string, repoDir: string): Promise<string | undefined> {
+  const dir = `${driveRoot}/${repoDir}`;
+  try {
+    return await git.resolveRef({ fs, dir, ref: "HEAD" });
+  } catch {
+    return undefined;
+  }
 }
 
 export async function checkoutBranch(

@@ -5,7 +5,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build --workspace @cat/shared && npm run build --workspace mewmew && npm run build --workspace cat-gui",
     "clean": "npm run clean --workspaces --if-present"
   },
   "engines": {

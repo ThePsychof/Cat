@@ -1,4 +1,4 @@
-import { init, events, app as neuApp } from "@neutralinojs/lib";
+import { init, events, app as neuApp, os } from "@neutralinojs/lib";
 import { readState, writeState, CatState } from "./state.js";
 import {
   cloneRepo,
@@ -12,6 +12,8 @@ import {
   getCurrentBranch,
   checkoutBranch,
   createBranch,
+  listFiles,
+  getCommitLog,
 } from "./git.js";
 import { getToken, setToken } from "./credentials.js";
 import { checkForUpdate, downloadUpdate, applyPendingUpdate } from "./update.js";
@@ -85,6 +87,9 @@ async function main() {
       setLocalIdentity(DRIVE_ROOT, repoDir, userName, userEmail),
 
     getChangedFiles: (repoDir: string) => getChangedFiles(DRIVE_ROOT, repoDir),
+    listFiles: (repoDir: string) => listFiles(DRIVE_ROOT, repoDir),
+    getCommitLog: (repoDir: string, maxCount?: number) =>
+      getCommitLog(DRIVE_ROOT, repoDir, maxCount ?? 20),
     stageAll: (repoDir: string) => stageAll(DRIVE_ROOT, repoDir),
     listBranches: (repoDir: string) => listBranches(DRIVE_ROOT, repoDir),
     getCurrentBranch: (repoDir: string) => getCurrentBranch(DRIVE_ROOT, repoDir),
@@ -94,6 +99,12 @@ async function main() {
       createBranch(DRIVE_ROOT, repoDir, branchName),
     commit: (repoDir: string, message: string, authorName: string, authorEmail: string) =>
       commit(DRIVE_ROOT, repoDir, message, authorName, authorEmail),
+    openInEditor: async (repoDir: string) => {
+      const repoPath = `${DRIVE_ROOT}/${repoDir}`;
+      const rawEditor = await os.getEnv("CAT_EDITOR");
+      const editor = rawEditor || (navigator.userAgent.includes("Windows") ? "code.cmd" : "code");
+      await os.execCommand(`"${editor}" "${repoPath}"`);
+    },
     setToken: (profileName: string, token: string, passphrase: string) =>
       setToken(DRIVE_ROOT, profileName, token, passphrase),
 

@@ -20,6 +20,18 @@ interface EncryptedBlob {
 const CREDENTIALS_FILENAME = "credentials.enc.json";
 const PBKDF2_ITERATIONS = 600_000;
 
+let cachedKey: { passphrase: string; salt: string; key: CryptoKey } | null = null;
+
+async function getOrDeriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKey> {
+  const saltHex = bytesToHex(salt);
+  if (cachedKey && cachedKey.passphrase === passphrase && cachedKey.salt === saltHex) {
+    return cachedKey.key;
+  }
+  const key = await deriveKey(passphrase, salt);
+  cachedKey = { passphrase, salt: saltHex, key };
+  return key;
+}
+
 function credentialsPath(driveRoot: string): string {
   return joinPath(driveRoot, ".cat", CREDENTIALS_FILENAME);
 }
@@ -56,7 +68,7 @@ async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKe
 async function encrypt(plaintext: string, passphrase: string): Promise<EncryptedBlob> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await deriveKey(passphrase, salt);
+  const key = await getOrDeriveKey(passphrase, salt);
 
   const ciphertext = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv: iv as BufferSource },
@@ -75,7 +87,7 @@ async function decrypt(blob: EncryptedBlob, passphrase: string): Promise<string>
   const salt = hexToBytes(blob.salt);
   const iv = hexToBytes(blob.iv);
   const data = hexToBytes(blob.data);
-  const key = await deriveKey(passphrase, salt);
+  const key = await getOrDeriveKey(passphrase, salt);
 
   try {
     const plaintext = await crypto.subtle.decrypt(

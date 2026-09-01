@@ -1,6 +1,6 @@
 {
   "name": "mewmew",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Cat — turn a drive into a portable, source-controlled dev environment.",
   "license": "MIT",
   "repository": {
@@ -19,7 +19,8 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
-    "commander": "^13.0.0"
+    "commander": "^13.0.0",
+    "@cat/shared": "*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

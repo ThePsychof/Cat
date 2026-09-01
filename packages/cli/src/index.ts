@@ -33,13 +33,24 @@ async function promptForOS(): Promise<TargetOS[]> {
   }
 }
 
-async function initCat(targetPath: string): Promise<void> {
+async function initCat(
+  targetPath: string,
+  localAssetsRoot?: string,
+  manifestUrlOverride?: string
+): Promise<void> {
+  if (localAssetsRoot) {
+    process.env.CAT_LOCAL_ASSET_ROOT = localAssetsRoot;
+  }
+  if (manifestUrlOverride) {
+    process.env.CAT_MANIFEST_URL = manifestUrlOverride;
+  }
+
   const selectedOS = await promptForOS(); // readline prompt runs before the spinner takes the line over
 
   const spinner = new CatSpinner();
   spinner.start(`Initializing Cat at: ${targetPath}`);
   try {
-    await provisionCat(targetPath, selectedOS, spinner);
+    await provisionCat(targetPath, selectedOS, spinner, manifestUrlOverride);
     spinner.succeed(`Cat is ready at ${targetPath}!`);
   } catch (err) {
     spinner.fail(`Something went wrong: ${(err as Error).message}`);
@@ -57,8 +68,10 @@ program
   .command("init")
   .description("Turn a drive into a Cat")
   .argument("[path]", "path to the target drive", ".")
-  .action(async (path: string) => {
-    await initCat(path);
+  .option("--local-assets <path>", "use a local fallback directory for manifest and launcher assets")
+  .option("--manifest-url <url>", "override the manifest source for local/offline testing")
+  .action(async (path: string, options: { localAssets?: string; manifestUrl?: string }) => {
+    await initCat(path, options.localAssets, options.manifestUrl);
   });
 
 program.parseAsync(process.argv);

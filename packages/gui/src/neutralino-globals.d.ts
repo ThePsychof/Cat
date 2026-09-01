@@ -1,0 +1,1 @@
+declare const NL_OS: "Windows" | "Linux" | "Darwin";

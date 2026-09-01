@@ -1,19 +1,25 @@
-import { filesystem } from "@neutralinojs/lib";
+import { filesystem, os } from "@neutralinojs/lib";
 import { joinPath, ensureDir } from "./neutralino-paths.js";
+
+interface UpdateAsset {
+  launcher: string;
+  icon: string;
+  launcherSha256: string;
+  iconSha256: string;
+}
 
 interface RemoteManifest {
   version: string;
   releaseTag: string;
-  assets: Record<string, { launcher: string; icon: string }>;
+  assets: Record<string, UpdateAsset>;
 }
 
 const MANIFEST_URL = "https://raw.githubusercontent.com/ThePsychof/Cat/main/manifest.json";
 const STAGING_DIR = ".cat/update-staging";
 
 function currentOSKey(): "windows" | "macos" | "linux" {
-  const platform = navigator.platform.toLowerCase();
-  if (platform.includes("win")) return "windows";
-  if (platform.includes("mac")) return "macos";
+  if (NL_OS === "Windows") return "windows";
+  if (NL_OS === "Darwin") return "macos";
   return "linux";
 }
 
@@ -24,10 +30,19 @@ export async function checkForUpdate(currentVersion: string): Promise<RemoteMani
   }
   const manifest = (await res.json()) as RemoteManifest;
 
-  if (manifest.version === currentVersion) {
+  if (!isNewerVersion(manifest.version, currentVersion)) {
     return null;
   }
   return manifest;
+}
+
+function isNewerVersion(remote: string, current: string): boolean {
+  const parse = (v: string) => v.split(".").map((n) => parseInt(n, 10) || 0);
+  const [rMaj, rMin, rPatch] = parse(remote);
+  const [cMaj, cMin, cPatch] = parse(current);
+  if (rMaj !== cMaj) return rMaj > cMaj;
+  if (rMin !== cMin) return rMin > cMin;
+  return rPatch > cPatch;
 }
 
 export async function downloadUpdate(
@@ -38,6 +53,9 @@ export async function downloadUpdate(
   const entry = manifest.assets[osKey];
   if (!entry) {
     throw new Error(`No update asset available for ${osKey}`);
+  }
+  if (!entry.launcherSha256) {
+    throw new Error(`Manifest missing launcherSha256 for ${osKey} — refusing to download unverifiable update.`);
   }
 
   const url = `https://github.com/ThePsychof/Cat/releases/download/${manifest.releaseTag}/${entry.launcher}`;
@@ -51,6 +69,14 @@ export async function downloadUpdate(
 
   const destFile = joinPath(stagingPath, entry.launcher);
   const buffer = await res.arrayBuffer();
+
+  const digest = await crypto.subtle.digest("SHA-256", buffer);
+  const actualSha = Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0")).join("");
+  if (actualSha.toLowerCase() !== entry.launcherSha256.toLowerCase()) {
+    throw new Error(`Update checksum mismatch for ${entry.launcher} — refusing to stage.`);
+  }
+
   await filesystem.writeBinaryFile(destFile, buffer);
 
   await filesystem.writeFile(
@@ -95,5 +121,10 @@ export async function applyPendingUpdate(driveRoot: string): Promise<void> {
   }
 
   await filesystem.move(stagedFile, destFile);
+
+  if (currentOSKey() !== "windows") {
+    await os.execCommand(`chmod +x "${destFile}"`);
+  }
+
   await filesystem.remove(joinPath(stagingPath, "pending.json"));
 }

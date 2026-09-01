@@ -334,6 +334,47 @@
       gap: 8px;
       margin-top: 4px;
     }
+
+    .tab-btn {
+      transition: border-color 0.15s ease, color 0.15s ease !important;
+    }
+
+    .tab-btn.active {
+      border-bottom-color: var(--ember) !important;
+      color: var(--ember-soft) !important;
+    }
+
+    .tab-btn:hover {
+      border-bottom-color: var(--ember) !important;
+      color: var(--ember-soft) !important;
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    #file-tree, #commit-list {
+      max-height: 400px;
+      overflow-y: auto;
+      padding: 8px;
+      background: var(--bg-panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+    }
+
+    .file-entry, .commit-entry {
+      padding: 4px 8px;
+      margin: 2px 0;
+      border-radius: 4px;
+    }
+
+    .file-entry:hover, .commit-entry:hover {
+      background: var(--line);
+    }
   </style>
 </head>
 <body>
@@ -346,18 +387,68 @@
     <button id="new-profile-btn">+ New profile</button>
   </div>
 
-  <div id="repo-section">
-    <ul id="repo-list"></ul>
+  <div id="repo-section" style="display: grid; grid-template-columns: 1fr 2fr; gap: 24px;">
+    <!-- Sidebar: Repository List -->
+    <aside style="border-right: 1px solid var(--line); padding-right: 20px;">
+      <h3 style="margin-top: 0;">Repositories</h3>
+      <ul id="repo-list"></ul>
+      <div id="empty-state">
+        <svg viewBox="0 0 120 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <ellipse cx="60" cy="55" rx="46" ry="20" fill="#2c2724"/>
+          <path d="M20 50 Q10 20 35 25 Q45 10 60 22 Q75 10 85 25 Q110 20 100 50 Q100 68 60 68 Q20 68 20 50Z" fill="#f2661a"/>
+          <path d="M32 26 Q28 30 34 34" stroke="#0f0e0d" stroke-width="2" fill="none" stroke-linecap="round"/>
+          <path d="M88 26 Q92 30 86 34" stroke="#0f0e0d" stroke-width="2" fill="none" stroke-linecap="round"/>
+        </svg>
+        <div>Clone a repo to begin.</div>
+      </div>
+    </aside>
 
-    <div id="empty-state">
-      <svg viewBox="0 0 120 80" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <ellipse cx="60" cy="55" rx="46" ry="20" fill="#2c2724"/>
-        <path d="M20 50 Q10 20 35 25 Q45 10 60 22 Q75 10 85 25 Q110 20 100 50 Q100 68 60 68 Q20 68 20 50Z" fill="#f2661a"/>
-        <path d="M32 26 Q28 30 34 34" stroke="#0f0e0d" stroke-width="2" fill="none" stroke-linecap="round"/>
-        <path d="M88 26 Q92 30 86 34" stroke="#0f0e0d" stroke-width="2" fill="none" stroke-linecap="round"/>
-      </svg>
-      <div>Cat's asleep. Clone a repo to wake it up.</div>
-    </div>
+    <!-- Main: Repository Browser -->
+    <main id="repo-viewer" style="display: none;">
+      <div style="border-bottom: 1px solid var(--line); padding-bottom: 16px; margin-bottom: 16px;">
+        <h2 id="repo-name" style="margin: 0 0 8px 0;"></h2>
+        <code id="remote-url" style="font-size: 12px; color: var(--text-muted);"></code>
+      </div>
+
+      <!-- Tabs -->
+      <div style="display: flex; gap: 16px; border-bottom: 1px solid var(--line); margin-bottom: 16px;">
+        <button class="tab-btn" data-tab="files" style="border: none; background: none; color: var(--text); padding: 0 0 8px 0; border-bottom: 2px solid transparent; cursor: pointer;">📁 Files</button>
+        <button class="tab-btn" data-tab="commits" style="border: none; background: none; color: var(--text); padding: 0 0 8px 0; border-bottom: 2px solid transparent; cursor: pointer;">🔗 Commits</button>
+        <button class="tab-btn" data-tab="status" style="border: none; background: none; color: var(--text); padding: 0 0 8px 0; border-bottom: 2px solid transparent; cursor: pointer;">⚖ Status</button>
+      </div>
+
+      <!-- Tab: Files -->
+      <div id="files-tab" class="tab-content" style="display: none;">
+        <div id="file-tree" style="font-family: 'JetBrains Mono', monospace; font-size: 12px;"></div>
+      </div>
+
+      <!-- Tab: Commits -->
+      <div id="commits-tab" class="tab-content" style="display: none;">
+        <div id="commit-list" style="font-family: 'JetBrains Mono', monospace; font-size: 12px;"></div>
+      </div>
+
+      <!-- Tab: Status -->
+      <div id="status-tab" class="tab-content" style="display: none;">
+        <div id="status-panel" style="display: block;">
+          <div id="branch-bar" style="display: flex; align-items: center; gap: 8px; margin-bottom: 14px; font-family: 'JetBrains Mono', monospace; font-size: 12px;">
+            <label for="branch-select">Branch</label>
+            <select id="branch-select"></select>
+            <button id="new-branch-btn">+ New</button>
+          </div>
+          <div style="margin-bottom: 14px;">
+            <h4 style="margin: 0 0 8px 0; font-size: 12px;">Changes</h4>
+            <ul id="changes-file-list" style="list-style: none; padding: 0; margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 12px;"></ul>
+          </div>
+          <textarea id="commit-message" placeholder="Describe this commit" rows="2" style="width: 100%; resize: vertical; margin-bottom: 10px; font-family: 'Inter', sans-serif;"></textarea>
+          <div style="display: flex; gap: 8px; margin-bottom: 14px;">
+            <button id="commit-btn" class="primary">✓ Commit</button>
+            <button id="pull-btn" class="primary">⬇ Pull</button>
+            <button id="push-btn" class="primary">⬆ Push</button>
+            <button id="open-btn">📂 Open in Editor</button>
+          </div>
+        </div>
+      </div>
+    </main>
   </div>
 
   <div id="clone-form">

@@ -2,11 +2,50 @@ node_modules/
 dist/
 release/
 *.log
+*.tmp
+*.swp
+*.bak
 .DS_Store
 Thumbs.db
 
+# Rust build output
+/target/
+**/target/
+
+# Local build artefacts
+coverage/
+.vite/
+.cache/
+
 # Local dev testing drive (never real device contents)
 packages/gui/dev-drive/
+packages/gui/.tmp/
+test-drive/
 
-# Never commit real credentials/state from local testing
+# Cat runtime state directories and local portable-drive data
 .cat/
+.cat/**
+cat-drive/
+flash-drive/
+usb-drive/
+drive/
+
+# Generated GUI packaging artefacts (kept as release assets, not source files)
+packages/gui/bin/
+packages/gui/release/
+packages/gui/resources/js/bundle.js
+packages/gui/resources/js/*.map
+
+# Local credential and sync caches
+*.secret
+*.key
+*.pem
+
+# Ignore generated manifests and local app payloads unless intentionally tracked
+manifest.local.json
+local-assets/
+.local-assets/
+**/.local-assets/
+
+# Keep the real drive content out of Git when testing on a host machine
+**/.cat/

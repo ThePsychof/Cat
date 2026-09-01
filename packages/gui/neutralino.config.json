@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/neutralinojs/neutralinojs/main/schemas/neutralino.config.schema.json",
   "applicationId": "com.thepsychof.cat",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "applicationName": "Cat",
   "applicationIcon": "/resources/icons/appIcon.png",
   "author": "ThePsychof",
