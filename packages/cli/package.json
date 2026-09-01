@@ -19,8 +19,8 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
-    "commander": "^13.0.0",
-    "@cat/shared": "*"
+    "@cat/shared": "*",
+    "commander": "^13.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

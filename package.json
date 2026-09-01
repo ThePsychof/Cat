@@ -18,6 +18,9 @@
   "allowScripts": {
     "electron@41.10.7": true,
     "electron-winstaller@5.4.0": true,
-    "esbuild@0.24.2": true
+    "bufferutil@4.1.0": true,
+    "es5-ext@0.10.64": true,
+    "utf-8-validate@5.0.10": true,
+    "esbuild@0.28.2": true
   }
 }

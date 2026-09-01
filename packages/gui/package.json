@@ -16,13 +16,13 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
+    "@cat/shared": "*",
     "@neutralinojs/lib": "^6.9.0",
-    "isomorphic-git": "^1.32.0",
-    "@cat/shared": "*"
+    "isomorphic-git": "^1.32.0"
   },
   "devDependencies": {
     "@neutralinojs/neu": "^11.0.0",
-    "typescript": "^5.7.0",
-    "esbuild": "^0.24.0"
+    "esbuild": "^0.28.2",
+    "typescript": "^5.7.0"
   }
 }
