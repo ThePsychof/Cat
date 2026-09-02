@@ -1,6 +1,6 @@
 {
-  "version": "0.0.4",
-  "releaseTag": "v0.0.4",
+  "version": "0.0.5",
+  "releaseTag": "v0.0.5",
   "assets": {
     "windows": {
       "launcher": "Cat.exe",

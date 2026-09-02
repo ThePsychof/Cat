@@ -95,12 +95,52 @@ fn provision(drive: &Path, mode: &str, cat_binary: Option<&Path>) -> Result<(), 
         serde_json::to_vec_pretty(&state).map_err(|e| format!("cannot encode state: {e}"))?;
     fs::write(metadata.join("state.json"), state_json)
         .map_err(|e| format!("cannot write state: {e}"))?;
+    let autorun_path = drive.join("autorun.inf");
     fs::write(
-        drive.join("autorun.inf"),
+        &autorun_path,
         "[autorun]\r\nlabel=Cat\r\nicon=.cat\\cat-icon.ico\r\n",
     )
     .map_err(|e| format!("cannot write autorun.inf: {e}"))?;
+
+    brand_drive(drive, &autorun_path)?;
+
     println!("Cat drive prepared in {mode} mode: {}", drive.display());
+    Ok(())
+}
+
+#[cfg(windows)]
+fn brand_drive(drive: &Path, autorun_path: &Path) -> Result<(), String> {
+    use std::process::Command;
+
+    // Windows only reliably honors autorun.inf when it carries System+Hidden
+    // attributes, matching how manufacturer USB sticks ship theirs. This is
+    // cosmetic — a failure here shouldn't block provisioning.
+    let _ = Command::new("attrib")
+        .args(["+s", "+h", &autorun_path.to_string_lossy()])
+        .status();
+
+    // The real persistent volume label (what "This PC" shows) is separate
+    // from autorun.inf's label= line, which only affects some legacy
+    // Explorer contexts. `label` is a cmd builtin, not a standalone exe.
+    let drive_letter = drive
+        .canonicalize()
+        .unwrap_or_else(|_| drive.to_path_buf())
+        .to_string_lossy()
+        .chars()
+        .take(2)
+        .collect::<String>();
+
+    if !drive_letter.is_empty() {
+        let _ = Command::new("cmd")
+            .args(["/C", "label", &drive_letter, "Cat"])
+            .status();
+    }
+
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn brand_drive(_drive: &Path, _autorun_path: &Path) -> Result<(), String> {
     Ok(())
 }
 

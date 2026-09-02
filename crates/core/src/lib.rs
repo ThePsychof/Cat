@@ -9,6 +9,136 @@ mod credentials;
 pub use credentials::{get_token, read_credentials, set_token, write_credentials, CredentialStore};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FileCompareStatus {
+    Same,
+    Modified,
+    LocalOnly,
+    RemoteOnly,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileComparison {
+    pub path: String,
+    pub status: FileCompareStatus,
+}
+
+fn list_tree_files(repo_dir: &Path, treeish: &str) -> Result<HashSet<String>, String> {
+    let output = git_output(repo_dir, &["ls-tree", "-r", "--name-only", treeish])?;
+    Ok(output.lines().map(|line| line.to_string()).collect())
+}
+
+pub fn compare_files_with_remote(
+    repo_dir: &Path,
+    remote: &str,
+    branch: &str,
+) -> Result<Vec<FileComparison>, String> {
+    let remote_ref = format!("{}/{}", remote, branch);
+
+    let local_files = list_tree_files(repo_dir, "HEAD")?;
+    let remote_files = match list_tree_files(repo_dir, &remote_ref) {
+        Ok(files) => files,
+        Err(_) => HashSet::new(), // no remote-tracking branch yet — everything reads as local-only
+    };
+
+    let diff_output = git_output(repo_dir, &["diff", "--name-status", &remote_ref, "HEAD"])
+        .unwrap_or_default();
+
+    let mut results = Vec::new();
+    let mut seen = HashSet::new();
+
+    for line in diff_output.lines() {
+        let mut parts = line.splitn(2, '\t');
+        let code = parts.next().unwrap_or("").trim();
+        let path = parts.next().unwrap_or("").trim().to_string();
+        if path.is_empty() {
+            continue;
+        }
+        let status = match code.chars().next().unwrap_or(' ') {
+            'A' => FileCompareStatus::LocalOnly,
+            'D' => FileCompareStatus::RemoteOnly,
+            _ => FileCompareStatus::Modified, // M (modified) and R (renamed) both read as "changed"
+        };
+        seen.insert(path.clone());
+        results.push(FileComparison { path, status });
+    }
+
+    // Anything present in both trees but absent from the diff is unchanged.
+    for path in local_files.intersection(&remote_files) {
+        if !seen.contains(path) {
+            results.push(FileComparison {
+                path: path.clone(),
+                status: FileCompareStatus::Same,
+            });
+        }
+    }
+
+    results.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(results)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TreeNode {
+    File { name: String, path: String },
+    Directory { name: String, path: String, children: Vec<TreeNode> },
+}
+
+pub fn build_file_tree(repo_dir: &Path) -> Result<Vec<TreeNode>, String> {
+    let files = list_files(repo_dir)?;
+    let mut root: Vec<TreeNode> = Vec::new();
+
+    for file_path in files {
+        insert_into_tree(&mut root, &file_path, &file_path);
+    }
+
+    Ok(root)
+}
+
+fn insert_into_tree(nodes: &mut Vec<TreeNode>, remaining: &str, full_path: &str) {
+    let (segment, rest) = match remaining.split_once('/') {
+        Some((first, rest)) => (first, Some(rest)),
+        None => (remaining, None),
+    };
+
+    match rest {
+        None => {
+            nodes.push(TreeNode::File {
+                name: segment.to_string(),
+                path: full_path.to_string(),
+            });
+        }
+        Some(rest) => {
+            let existing = nodes.iter_mut().find(|n| matches!(n, TreeNode::Directory { name, .. } if name == segment));
+
+            let dir_path = &full_path[..full_path.len() - rest.len() - 1];
+
+            match existing {
+                Some(TreeNode::Directory { children, .. }) => {
+                    insert_into_tree(children, rest, full_path);
+                }
+                _ => {
+                    let mut children = Vec::new();
+                    insert_into_tree(&mut children, rest, full_path);
+                    nodes.push(TreeNode::Directory {
+                        name: segment.to_string(),
+                        path: dir_path.to_string(),
+                        children,
+                    });
+                }
+            }
+        }
+    }
+}
+
+pub fn read_file_at_head(repo_dir: &Path, file_path: &str) -> Result<String, String> {
+    git_output(repo_dir, &["show", &format!("HEAD:{}", file_path)])
+}
+
+pub fn compare_repo_with_origin(repo_dir: &Path) -> Result<Vec<FileComparison>, String> {
+    let branch = get_current_branch(repo_dir)?;
+    compare_files_with_remote(repo_dir, "origin", &branch)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RepoSyncState {
     UpToDate,
     Ahead,
@@ -222,10 +352,26 @@ fn directory_size(path: &Path) -> Result<u64, std::io::Error> {
 }
 
 fn git_output(repo_dir: &Path, args: &[&str]) -> Result<String, String> {
+    git_output_authed(repo_dir, None, args)
+}
+
+fn git_output_authed(repo_dir: &Path, token: Option<&str>, args: &[&str]) -> Result<String, String> {
+    use base64::Engine;
+
     let git = git_program(repo_dir)?;
+    let mut full_args: Vec<String> = Vec::new();
+
+    if let Some(token) = token {
+        let encoded = base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{token}"));
+        full_args.push("-c".to_string());
+        full_args.push(format!("http.extraHeader=Authorization: Basic {encoded}"));
+    }
+
+    full_args.extend(args.iter().map(|s| s.to_string()));
+
     let output = Command::new(git)
         .current_dir(repo_dir)
-        .args(args)
+        .args(&full_args)
         .output()
         .map_err(|e| format!("Unable to execute git {}: {e}", args.join(" ")))?;
 
@@ -264,18 +410,18 @@ pub struct SyncProgress {
     pub total: Option<u64>,
 }
 
-pub fn fetch_repository(repo_dir: &Path, remote: &str) -> Result<(), String> {
-    git_output(repo_dir, &["fetch", remote])?;
+pub fn fetch_repository(repo_dir: &Path, remote: &str, token: Option<&str>) -> Result<(), String> {
+    git_output_authed(repo_dir, token, &["fetch", remote])?;
     Ok(())
 }
 
-pub fn pull_repository(repo_dir: &Path, remote: &str, branch: &str) -> Result<(), String> {
-    git_output(repo_dir, &["pull", remote, branch])?;
+pub fn pull_repository(repo_dir: &Path, remote: &str, branch: &str, token: Option<&str>) -> Result<(), String> {
+    git_output_authed(repo_dir, token, &["pull", remote, branch])?;
     Ok(())
 }
 
-pub fn push_repository(repo_dir: &Path, remote: &str, branch: &str) -> Result<(), String> {
-    git_output(repo_dir, &["push", remote, branch])?;
+pub fn push_repository(repo_dir: &Path, remote: &str, branch: &str, token: Option<&str>) -> Result<(), String> {
+    git_output_authed(repo_dir, token, &["push", remote, branch])?;
     Ok(())
 }
 
