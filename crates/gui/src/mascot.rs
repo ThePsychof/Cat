@@ -35,7 +35,7 @@ const MASCOT_HTML: &str = r##"<!DOCTYPE html>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
     width: 100%; height: 100%;
-    background: transparent;
+        background: rgb(17, 20, 26);
     overflow: hidden;
     display: flex; align-items: center; justify-content: center;
   }

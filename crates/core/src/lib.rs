@@ -408,7 +408,7 @@ fn git_program(repo_dir: &Path) -> Result<PathBuf, String> {
     }
     #[cfg(not(test))]
     {
-        Err("Portable Git is missing from the Cat drive (.cat/tools/git)".into())
+        Ok(PathBuf::from(if cfg!(windows) { "git.exe" } else { "git" }))
     }
 }
 
