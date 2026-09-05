@@ -3,6 +3,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+fn hide_console(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+}
+
 use serde::{Deserialize, Serialize};
 
 mod credentials;
@@ -133,7 +141,13 @@ pub fn read_file_at_head(repo_dir: &Path, file_path: &str) -> Result<String, Str
     git_output(repo_dir, &["show", &format!("HEAD:{}", file_path)])
 }
 
-pub fn compare_repo_with_origin(repo_dir: &Path) -> Result<Vec<FileComparison>, String> {
+pub fn compare_repo_with_origin(
+    repo_dir: &Path,
+    token: Option<&str>,
+) -> Result<Vec<FileComparison>, String> {
+    // Fetch first so the comparison reflects the actual remote state,
+    // not whatever was last fetched locally.
+    let _ = fetch_repository(repo_dir, "origin", token); // ignore fetch errors (e.g. offline)
     let branch = get_current_branch(repo_dir)?;
     compare_files_with_remote(repo_dir, "origin", &branch)
 }
@@ -369,6 +383,9 @@ fn git_output_authed(repo_dir: &Path, token: Option<&str>, args: &[&str]) -> Res
     let git = git_program(repo_dir)?;
     let mut full_args: Vec<String> = Vec::new();
 
+    full_args.push("-c".to_string());
+    full_args.push(format!("safe.directory={}", repo_dir.display()));
+
     if let Some(token) = token {
         let encoded = base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{token}"));
         full_args.push("-c".to_string());
@@ -377,7 +394,9 @@ fn git_output_authed(repo_dir: &Path, token: Option<&str>, args: &[&str]) -> Res
 
     full_args.extend(args.iter().map(|s| s.to_string()));
 
-    let output = Command::new(git)
+    let mut command = Command::new(git);
+    hide_console(&mut command);
+    let output = command
         .current_dir(repo_dir)
         .args(&full_args)
         .output()
@@ -454,7 +473,9 @@ pub fn clone_repository(url: &str, target_dir: &Path, token: Option<&str>) -> Re
     args.push(url.to_string());
     args.push(target_dir.to_string_lossy().to_string());
 
-    let output = Command::new(git)
+    let mut command = Command::new(git);
+    hide_console(&mut command);
+    let output = command
         .args(&args)
         .output()
         .map_err(|e| format!("Unable to execute git clone {url}: {e}"))?;
@@ -566,9 +587,21 @@ pub fn commit_changes(
     let git = git_program(repo_dir)?;
     let name_config = format!("user.name={author_name}");
     let email_config = format!("user.email={author_email}");
-    let output = Command::new(git)
+    let mut command = Command::new(git);
+    hide_console(&mut command);
+    let output = command
         .current_dir(repo_dir)
-        .args(["-c", &name_config, "-c", &email_config, "commit", "-m", message])
+        .args([
+            "-c",
+            &format!("safe.directory={}", repo_dir.display()),
+            "-c",
+            &name_config,
+            "-c",
+            &email_config,
+            "commit",
+            "-m",
+            message,
+        ])
         .output()
         .map_err(|e| format!("Unable to execute git commit: {e}"))?;
     if !output.status.success() {
@@ -578,11 +611,31 @@ pub fn commit_changes(
 }
 
 pub fn open_in_editor(repo_dir: &Path, editor: &str) -> Result<(), String> {
-    Command::new(editor)
-        .arg(repo_dir)
-        .spawn()
-        .map_err(|e| format!("Failed to open {} in {}: {e}", repo_dir.display(), editor))?;
-    Ok(())
+    // On Windows, many editors (including VS Code's `code`) are installed as
+    // `.cmd` shell scripts rather than plain `.exe` files.  CreateProcess
+    // (what Command uses) cannot launch `.cmd` files directly — they require
+    // the shell (cmd.exe) as the host process.
+    #[cfg(windows)]
+    {
+        let mut command = Command::new("cmd");
+        hide_console(&mut command);
+        command
+            .args(["/C", editor])
+            .arg(repo_dir)
+            .spawn()
+            .map_err(|e| format!("Failed to open {} in {}: {e}", repo_dir.display(), editor))?;
+        return Ok(());
+    }
+    #[cfg(not(windows))]
+    {
+        let mut command = Command::new(editor);
+        hide_console(&mut command);
+        command
+            .arg(repo_dir)
+            .spawn()
+            .map_err(|e| format!("Failed to open {} in {}: {e}", repo_dir.display(), editor))?;
+        Ok(())
+    }
 }
 
 pub fn clone_from_drive(source_repo_path: &Path, target_dir: &Path) -> Result<(), String> {
@@ -593,7 +646,9 @@ pub fn clone_from_drive(source_repo_path: &Path, target_dir: &Path) -> Result<()
         .to_string();
 
     let git = git_program(source_repo_path)?;
-    let output = Command::new(git)
+    let mut command = Command::new(git);
+    hide_console(&mut command);
+    let output = command
         .arg("clone")
         .arg(&source_path)
         .arg(target_dir)

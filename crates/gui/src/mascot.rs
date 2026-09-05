@@ -1,5 +1,4 @@
 use eframe::egui;
-use winit;
 
 /// Moods the app can request.  Each maps to a `cat.play(action)` JS call.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -10,23 +9,12 @@ pub enum CatMood {
     Sad,
 }
 
-impl CatMood {
-    /// The JS action string passed to `cat.play(…)`.
-    fn action(self) -> &'static str {
-        match self {
-            CatMood::Idle => "idle",
-            CatMood::Working => "working",
-            CatMood::Happy => "happy",
-            CatMood::Sad => "cry",
-        }
-    }
-}
-
 // ─── HTML page ──────────────────────────────────────────────────────────────
 //
 // The entire mascot lives here: SVG + CSS animations + JS cat.play() API.
 // The page background is transparent so the WebView blends with egui's panel.
 
+#[allow(dead_code)]
 const MASCOT_HTML: &str = r##"<!DOCTYPE html>
 <html>
 <head>
@@ -193,21 +181,13 @@ const MASCOT_H: f32 = 56.0;
 const REACTION_DURATION: f32 = 2.5;
 
 pub struct WebViewMascot {
-    /// Created lazily on the first `show()` call, once we have an HWND.
-    webview: Option<wry::WebView>,
-    /// Pending mood to apply as soon as the WebView is ready (or on next tick).
-    pending_mood: Option<CatMood>,
-    /// Current mood — tracked so we only call evaluate_script on changes.
     current_mood: CatMood,
-    /// Seconds since the current transient mood was applied.
     mood_elapsed: f32,
 }
 
 impl WebViewMascot {
     pub fn new() -> Self {
         Self {
-            webview: None,
-            pending_mood: None,
             current_mood: CatMood::Idle,
             mood_elapsed: 0.0,
         }
@@ -217,7 +197,6 @@ impl WebViewMascot {
         if self.current_mood != mood {
             self.current_mood = mood;
             self.mood_elapsed = 0.0;
-            self.apply_mood();
         }
     }
 
@@ -230,92 +209,34 @@ impl WebViewMascot {
         }
     }
 
-    fn apply_mood(&mut self) {
-        if let Some(wv) = &self.webview {
-            let action = self.current_mood.action();
-            let _ = wv.evaluate_script(&format!("cat.play('{action}')"));
-        } else {
-            // Will be replayed once the WebView initialises.
-            self.pending_mood = Some(self.current_mood);
-        }
-    }
+    pub fn show(&mut self, ui: &mut egui::Ui) {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(MASCOT_W, MASCOT_H), egui::Sense::hover());
+        let painter = ui.painter_at(rect);
+        let center = rect.center();
+        let orange = egui::Color32::from_rgb(245, 148, 31);
+        let outline = egui::Color32::BLACK;
+        let white = egui::Color32::WHITE;
 
-    /// Call once per frame from inside the egui `update()`.
-    ///
-    /// Allocates a fixed-size rect in the current UI, then creates (or
-    /// repositions) the wry child WebView to cover that same rect in OS
-    /// window coordinates.
-    pub fn show(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        // Reserve space in the egui layout.
-        let (rect, _response) =
-            ui.allocate_exact_size(egui::vec2(MASCOT_W, MASCOT_H), egui::Sense::hover());
-
-        // Convert to integer physical pixels for Win32 / WebView2.
-        let pixels_per_point = ui.ctx().pixels_per_point();
-        let to_phys = |v: f32| (v * pixels_per_point).round() as i32;
-
-        let phys_x = to_phys(rect.min.x);
-        let phys_y = to_phys(rect.min.y);
-        let phys_w = to_phys(rect.width()).max(1) as u32;
-        let phys_h = to_phys(rect.height()).max(1) as u32;
-
-        // Grab the winit window — None in headless/test contexts.
-        let Some(window) = frame.winit_window() else { return };
-
-        if self.webview.is_none() {
-            self.init_webview(window, phys_x, phys_y, phys_w, phys_h);
-        } else {
-            self.reposition(phys_x, phys_y, phys_w, phys_h);
-        }
-    }
-
-    fn init_webview(
-        &mut self,
-        window: &std::sync::Arc<winit::window::Window>,
-        x: i32, y: i32, w: u32, h: u32,
-    ) {
-        use wry::dpi::{PhysicalPosition, PhysicalSize};
-        use wry::{Rect, WebViewBuilder};
-
-        let bounds = Rect {
-            position: PhysicalPosition::new(x, y).into(),
-            size:     PhysicalSize::new(w, h).into(),
-        };
-
-        let result = WebViewBuilder::new()
-            .with_bounds(bounds)
-            .with_html(MASCOT_HTML)
-            .with_transparent(true)
-            .with_accept_first_mouse(true)
-            // Disable the right-click context menu and dev tools in release.
-            .with_devtools(cfg!(debug_assertions))
-            .build_as_child(window);
-
-        match result {
-            Ok(wv) => {
-                self.webview = Some(wv);
-                // Replay any mood that was set before the WebView existed.
-                if let Some(mood) = self.pending_mood.take() {
-                    self.current_mood = mood;
-                    self.apply_mood();
-                }
-            }
-            Err(e) => {
-                eprintln!("WebViewMascot: failed to create WebView: {e}");
-            }
-        }
-    }
-
-    fn reposition(&mut self, x: i32, y: i32, w: u32, h: u32) {
-        use wry::dpi::{PhysicalPosition, PhysicalSize};
-        use wry::Rect;
-
-        if let Some(wv) = &self.webview {
-            let bounds = Rect {
-                position: PhysicalPosition::new(x, y).into(),
-                size:     PhysicalSize::new(w, h).into(),
-            };
-            let _ = wv.set_bounds(bounds);
-        }
+        painter.add(egui::Shape::convex_polygon(
+            vec![center + egui::vec2(-21.0, -9.0), center + egui::vec2(-17.0, -27.0), center + egui::vec2(-5.0, -14.0)],
+            orange,
+            egui::Stroke::new(1.5, outline),
+        ));
+        painter.add(egui::Shape::convex_polygon(
+            vec![center + egui::vec2(21.0, -9.0), center + egui::vec2(17.0, -27.0), center + egui::vec2(5.0, -14.0)],
+            orange,
+            egui::Stroke::new(1.5, outline),
+        ));
+        painter.circle_filled(center + egui::vec2(0.0, 8.0), 19.0, orange);
+        painter.circle_stroke(center + egui::vec2(0.0, 8.0), 19.0, egui::Stroke::new(1.5, outline));
+        painter.circle_filled(center + egui::vec2(-7.0, 5.0), 6.0, white);
+        painter.circle_filled(center + egui::vec2(7.0, 5.0), 6.0, white);
+        painter.circle_filled(center + egui::vec2(-7.0, 6.0), 3.0, egui::Color32::from_rgb(10, 10, 10));
+        painter.circle_filled(center + egui::vec2(7.0, 6.0), 3.0, egui::Color32::from_rgb(10, 10, 10));
+        painter.line_segment([center + egui::vec2(0.0, 10.0), center + egui::vec2(0.0, 14.0)], egui::Stroke::new(1.2, outline));
+        painter.line_segment([center + egui::vec2(-5.0, 13.0), center + egui::vec2(0.0, 17.0)], egui::Stroke::new(1.2, outline));
+        painter.line_segment([center + egui::vec2(0.0, 17.0), center + egui::vec2(5.0, 13.0)], egui::Stroke::new(1.2, outline));
+        painter.line_segment([center + egui::vec2(-12.0, 13.0), center + egui::vec2(-25.0, 11.0)], egui::Stroke::new(1.0, outline));
+        painter.line_segment([center + egui::vec2(12.0, 13.0), center + egui::vec2(25.0, 11.0)], egui::Stroke::new(1.0, outline));
     }
 }

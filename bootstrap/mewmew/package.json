@@ -1,6 +1,6 @@
 {
   "name": "mewmew",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Native Rust mewmew provisioner bootstrap for Cat drives.",
   "license": "MIT",
   "repository": {

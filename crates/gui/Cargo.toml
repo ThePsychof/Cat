@@ -1,6 +1,6 @@
 [package]
 name = "cat-gui"
-version = "0.0.7"
+version = "0.0.8"
 edition = "2024"
 license = "GPL-3.0"
 
@@ -16,7 +16,6 @@ path = "src/main.rs"
 cat-core = { path = "../core" }
 eframe = { version = "0.36.1", default-features = false, features = ["glow", "default_fonts", "persistence"] }
 winit = "0.30"
-wry = { version = "0.56.1", default-features = false, features = ["os-webview"] }
 
 [build-dependencies]
 winresource = "0.1.31"
