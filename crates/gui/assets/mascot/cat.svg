@@ -1,0 +1,132 @@
+<svg id="cat" class="cat-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 380" width="320" height="380">
+  <style>
+    .cat { transform-origin: 160px 220px; animation: bob 2.2s ease-in-out infinite; }
+    .tail { transform-origin: 232px 305px; animation: tail 1.6s ease-in-out infinite; }
+    .ear { transform-origin: center; animation: ear 3.4s ease-in-out infinite; }
+    .ear.r { animation-delay: .3s; }
+    .eyelid { transform-box: fill-box; transform-origin: 50% 0%; animation: blink 5s infinite; }
+
+    @keyframes bob   { 0%,100% { transform: translateY(0);    } 50% { transform: translateY(-3px); } }
+    @keyframes tail  { 0%,100% { transform: rotate(0deg);     } 50% { transform: rotate(6deg);     } }
+    @keyframes ear   { 0%,85%,100% { transform: rotate(0);   } 90% { transform: rotate(-5deg);    } 95% { transform: rotate(2deg); } }
+    @keyframes blink { 0%,44%,48%,100% { transform: scaleY(0); } 38% { transform: scaleY(1); } }
+
+    /* --- CRY action --- */
+    #cat-character.crying { animation: cry-body 0.18s ease-in-out infinite; }
+
+    #cat-character.crying #ear-left  { animation: cry-ear-left  1s   ease-in-out infinite; }
+    #cat-character.crying #ear-right { animation: cry-ear-right 1s   ease-in-out infinite; }
+    #cat-character.crying #tail      { animation: cry-tail      1.8s ease-in-out infinite; }
+
+    #cat-character.crying #pupil-left  { animation: sad-pupil-left  0.8s ease-in-out forwards; }
+    #cat-character.crying #pupil-right { animation: sad-pupil-right 0.8s ease-in-out forwards; }
+
+    #cat-character.crying #tears      { opacity: 1; }
+    #cat-character.crying #tear-left  { animation: tear-left  1.2s ease-in infinite; }
+    #cat-character.crying #tear-right { animation: tear-right 1.2s ease-in infinite; }
+
+    @keyframes cry-body {
+      0%, 100% { transform: translateX(0);      }
+      25%       { transform: translateX(-1.5px); }
+      75%       { transform: translateX(1.5px);  }
+    }
+    @keyframes cry-ear-left  { 0%,100% { transform: rotate(0deg);  } 50% { transform: rotate(5deg);  } }
+    @keyframes cry-ear-right { 0%,100% { transform: rotate(0deg);  } 50% { transform: rotate(-5deg); } }
+    @keyframes cry-tail      { 0%,100% { transform: rotate(0deg);  } 50% { transform: rotate(-5deg); } }
+
+    @keyframes sad-pupil-left  { from { transform: translate(0,0); } to { transform: translate(0,-4px); } }
+    @keyframes sad-pupil-right { from { transform: translate(0,0); } to { transform: translate(0,-4px); } }
+
+    @keyframes tear-left {
+      0%   { transform: translateY(0);    opacity: 0; }
+      15%  {                              opacity: 1; }
+      100% { transform: translateY(55px); opacity: 0; }
+    }
+    @keyframes tear-right {
+      0%   { transform: translateY(0);    opacity: 0; }
+      15%  {                              opacity: 1; }
+      100% { transform: translateY(55px); opacity: 0; }
+    }
+
+    /* transform context for animated child elements */
+    #cat-character #ear-left,
+    #cat-character #ear-right,
+    #cat-character #tail,
+    #cat-character #pupil-left,
+    #cat-character #pupil-right,
+    #cat-character #tear-left,
+    #cat-character #tear-right {
+      transform-box: fill-box;
+      transform-origin: center;
+    }
+  </style>
+
+  <g id="cat-character" class="cat">
+
+    <!-- tail -->
+    <path id="tail" class="tail" d="M232 305 C280 300 295 255 278 215"
+          fill="none" stroke="#f5941f" stroke-width="22" stroke-linecap="round"/>
+    <circle cx="278" cy="215" r="15" fill="#ffffff" stroke="#000" stroke-width="4"/>
+
+    <!-- body -->
+    <ellipse cx="160" cy="290" rx="82" ry="68" fill="#f5941f" stroke="#000" stroke-width="4"/>
+    <ellipse cx="160" cy="302" rx="46" ry="50" fill="#ffffff" stroke="#000" stroke-width="4"/>
+
+    <!-- paws -->
+    <ellipse cx="132" cy="358" rx="17" ry="10" fill="#ffffff" stroke="#000" stroke-width="4"/>
+    <ellipse cx="188" cy="358" rx="17" ry="10" fill="#ffffff" stroke="#000" stroke-width="4"/>
+
+    <!-- ears -->
+    <path id="ear-left"        class="ear l"       d="M80.25 132.8 L60 20 L137.23 85 Z"  fill="#f5941f" stroke="#000" stroke-width="4" stroke-linejoin="round"/>
+    <path id="ear-right"       class="ear r"       d="M239.75 132.8 L260 20 L182.77 85 Z" fill="#f5941f" stroke="#000" stroke-width="4" stroke-linejoin="round"/>
+    <path id="ear-left-inner"  class="ear l inner" d="M92 118 L72 55 L118 85 Z"           fill="#f7a97a"/>
+    <path id="ear-right-inner" class="ear r inner" d="M228 118 L248 55 L202 85 Z"          fill="#f7a97a"/>
+
+    <!-- head -->
+    <circle cx="160" cy="170" r="95" fill="#f5941f" stroke="#000" stroke-width="4"/>
+
+    <!-- eyes -->
+    <g id="eyes">
+      <g id="eye-left">
+        <circle cx="125" cy="165" r="30" fill="#ffffff" stroke="#000" stroke-width="4"/>
+        <circle id="pupil-left" cx="127" cy="167" r="19" fill="#1a6b7a"/>
+        <circle cx="129" cy="169" r="10" fill="#0a0a0a"/>
+        <circle cx="121" cy="159" r="4"  fill="#ffffff"/>
+      </g>
+      <g id="eye-right">
+        <circle cx="195" cy="165" r="30" fill="#ffffff" stroke="#000" stroke-width="4"/>
+        <circle id="pupil-right" cx="197" cy="167" r="19" fill="#1a6b7a"/>
+        <circle cx="199" cy="169" r="10" fill="#0a0a0a"/>
+        <circle cx="191" cy="159" r="4"  fill="#ffffff"/>
+      </g>
+    </g>
+
+    <!-- eyelids (hidden at scaleY 0, animate to scaleY 1 on blink) -->
+    <circle class="eyelid" cx="125" cy="165" r="31" fill="#f5941f"/>
+    <circle class="eyelid" cx="195" cy="165" r="31" fill="#f5941f"/>
+    <path   class="eyelid" d="M94 165 A31 31 0 0 1 156 165" fill="none" stroke="#000" stroke-width="4"/>
+    <path   class="eyelid" d="M164 165 A31 31 0 0 1 226 165" fill="none" stroke="#000" stroke-width="4"/>
+
+    <!-- tears (hidden by default; shown when .crying) -->
+    <g id="tears" opacity="0" pointer-events="none">
+      <ellipse id="tear-left"  cx="125" cy="193" rx="5" ry="9" fill="#66c7e8"/>
+      <ellipse id="tear-right" cx="195" cy="193" rx="5" ry="9" fill="#66c7e8"/>
+    </g>
+
+    <!-- nose -->
+    <path d="M150 202 Q160 195 170 202 Q166 210 160 210 Q154 210 150 202 Z"
+          fill="#2b2b3a" stroke="#000" stroke-width="1.5"/>
+
+    <!-- mouth -->
+    <path id="mouth"
+          d="M160 210 L160 218 M160 218 Q150 218 145 210 M160 218 Q170 218 175 210"
+          fill="none" stroke="#000" stroke-width="3" stroke-linecap="round"/>
+
+    <!-- whiskers -->
+    <g stroke="#000" stroke-width="3" stroke-linecap="round">
+      <path d="M115 205 L65 198 M115 213 L62 215 M118 221 L68 230"/>
+      <path d="M205 205 L255 198 M205 213 L258 215 M202 221 L252 230"/>
+    </g>
+
+  </g>
+</svg>

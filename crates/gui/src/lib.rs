@@ -11,7 +11,7 @@ use cat_core::{
 use eframe::egui;
 
 mod mascot;
-use mascot::{CatMascot, CatMood};
+use mascot::{CatMood, WebViewMascot};
 
 pub fn app_name() -> &'static str {
     "Cat"
@@ -47,7 +47,7 @@ struct CatApp {
     new_profile_user_email: String,
     new_profile_token: String,
     commit_message: String,
-    mascot: CatMascot,
+    mascot: WebViewMascot,
 }
 
 impl Default for CatApp {
@@ -105,7 +105,7 @@ impl CatApp {
             new_profile_user_email: String::new(),
             new_profile_token: String::new(),
             commit_message: String::new(),
-            mascot: CatMascot::new(&cc.egui_ctx),
+            mascot: WebViewMascot::new(),
         };
         app.refresh();
         app
@@ -239,11 +239,13 @@ impl CatApp {
     }
 
     fn refresh(&mut self) {
-        let root = self.drive_root.join("repositories");
+        let root = self.drive_root.clone();
         self.repositories = discover_repositories(&root).unwrap_or_default();
         if self.selected_index >= self.repositories.len() {
             self.selected_index = self.repositories.len().saturating_sub(1);
         }
+        self.drive_state.repositories = self.repositories.clone();
+        let _ = save_drive_state(&self.drive_root, &self.drive_state);
         self.load_tree_for_selected();
     }
 
@@ -343,7 +345,7 @@ impl CatApp {
         }
 
         self.mascot.set_mood(CatMood::Working);
-        match clone_repository(&url, &target_dir) {
+        match clone_repository(&url, &target_dir, self.current_token().as_deref()) {
             Ok(()) => {
                 self.set_status(format!("Cloned {repo_name}."), false);
                 self.mascot.set_mood(CatMood::Happy);
@@ -359,7 +361,7 @@ impl CatApp {
 }
 
 impl eframe::App for CatApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
 
         let dt = ui.ctx().input(|i| i.stable_dt);
         self.mascot.tick(dt);
@@ -368,7 +370,7 @@ impl eframe::App for CatApp {
         egui::Panel::top("cat_header")
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    self.mascot.show(ui);
+                    self.mascot.show(ui, frame);
                     ui.vertical(|ui| {
                         ui.label(
                             egui::RichText::new("Cat")
@@ -478,7 +480,7 @@ impl eframe::App for CatApp {
                     ui.vertical_centered(|ui| {
                         ui.add_space(32.0);
                         ui.label(egui::RichText::new("🐾 no repositories yet").size(18.0));
-                        ui.label(egui::RichText::new("Drop repos on the drive to begin.").color(egui::Color32::from_rgb(148, 163, 184)));
+                        ui.label(egui::RichText::new("Clone a repository above, or place repos in the repositories/ folder.").color(egui::Color32::from_rgb(148, 163, 184)));
                     });
                     return;
                 }
@@ -738,6 +740,7 @@ impl eframe::App for CatApp {
 fn highlight_code(text: &str) -> egui::text::LayoutJob {
     use egui::text::{LayoutJob, TextFormat};
     use egui::{Color32, FontId};
+    use std::collections::HashSet;
 
     const KEYWORDS: &[&str] = &[
         "fn", "let", "mut", "pub", "struct", "enum", "impl", "use", "mod", "return", "if", "else",
@@ -753,73 +756,71 @@ fn highlight_code(text: &str) -> egui::text::LayoutJob {
     let keyword_fmt = TextFormat::simple(FontId::monospace(12.5), Color32::from_rgb(251, 146, 60));
     let number_fmt = TextFormat::simple(FontId::monospace(12.5), Color32::from_rgb(129, 178, 255));
 
+    // Build keyword lookup set once — O(k), amortised over all lines.
+    let keyword_set: HashSet<&str> = KEYWORDS.iter().copied().collect();
+
     let mut job = LayoutJob::default();
 
     for line in text.split_inclusive('\n') {
+        // ── Comment detection (whole-line, runs first) ────────────────
         if let Some(comment_start) = line.find("//").or_else(|| line.find('#')) {
             job.append(&line[..comment_start], 0.0, base.clone());
             job.append(&line[comment_start..], 0.0, comment_fmt.clone());
             continue;
         }
 
-        let mut rest = line;
-        while !rest.is_empty() {
-            if let Some(quote_start) = rest.find(['"', '\'']) {
-                job.append(&rest[..quote_start], 0.0, base.clone());
-                let quote_char = rest.as_bytes()[quote_start] as char;
-                let after_quote = &rest[quote_start + 1..];
-                let quote_end = after_quote.find(quote_char).map(|i| quote_start + 1 + i + 1).unwrap_or(rest.len());
-                job.append(&rest[quote_start..quote_end], 0.0, string_fmt.clone());
-                rest = &rest[quote_end..];
+        // ── Token walk via char_indices (O(n) per line) ───────────────
+        let len = line.len();
+        let mut i = 0usize;
+
+        while i < len {
+            let c = line[i..].chars().next().unwrap();
+            let c_len = c.len_utf8();
+
+            if c == '"' || c == '\'' {
+                // String / character literal — scan to matching closing quote.
+                let quote = c;
+                let after = &line[i + c_len..];
+                let close = after.find(quote)
+                    .map(|j| i + c_len + j + quote.len_utf8())
+                    .unwrap_or(len);
+                job.append(&line[i..close], 0.0, string_fmt.clone());
+                i = close;
                 continue;
             }
 
-            let mut matched = false;
-            for word in KEYWORDS {
-                if let Some(pos) = rest.find(word) {
-                    let boundary_ok = |idx: usize, s: &str| {
-                        idx == 0
-                            || !s.as_bytes()[idx - 1].is_ascii_alphanumeric() && s.as_bytes()[idx - 1] != b'_'
-                    };
-                    let end = pos + word.len();
-                    let end_ok = end >= s_len(rest) || !rest.as_bytes()[end].is_ascii_alphanumeric() && rest.as_bytes()[end] != b'_';
-                    if boundary_ok(pos, rest) && end_ok {
-                        job.append(&rest[..pos], 0.0, base.clone());
-                        job.append(&rest[pos..end], 0.0, keyword_fmt.clone());
-                        rest = &rest[end..];
-                        matched = true;
+            if c.is_ascii_alphanumeric() || c == '_' {
+                // Identifier or number token — collect the full run.
+                let start = i;
+                i += c_len;
+                while i < len {
+                    let nc = line[i..].chars().next().unwrap();
+                    if nc.is_ascii_alphanumeric() || nc == '_' || (nc == '.' && line.as_bytes()[start].is_ascii_digit()) {
+                        i += nc.len_utf8();
+                    } else {
                         break;
                     }
                 }
-            }
-            if matched {
+                let token = &line[start..i];
+
+                // Number token: starts with an ASCII digit
+                if token.as_bytes()[0].is_ascii_digit() {
+                    job.append(token, 0.0, number_fmt.clone());
+                } else if keyword_set.contains(token) {
+                    job.append(token, 0.0, keyword_fmt.clone());
+                } else {
+                    job.append(token, 0.0, base.clone());
+                }
                 continue;
             }
 
-            if let Some(pos) = rest.find(|c: char| c.is_ascii_digit()) {
-                let is_start_ok = pos == 0 || !rest.as_bytes()[pos - 1].is_ascii_alphanumeric();
-                if is_start_ok {
-                    let end = rest[pos..]
-                        .find(|c: char| !c.is_ascii_digit() && c != '.')
-                        .map(|i| pos + i)
-                        .unwrap_or(rest.len());
-                    job.append(&rest[..pos], 0.0, base.clone());
-                    job.append(&rest[pos..end], 0.0, number_fmt.clone());
-                    rest = &rest[end..];
-                    continue;
-                }
-            }
-
-            job.append(rest, 0.0, base.clone());
-            rest = "";
+            // Any other character (punctuation, space, etc.)
+            job.append(&line[i..i + c_len], 0.0, base.clone());
+            i += c_len;
         }
     }
 
     job
-}
-
-fn s_len(s: &str) -> usize {
-    s.len()
 }
 
 fn render_tree(ui: &mut egui::Ui, nodes: &[TreeNode], app: &mut CatApp) {
@@ -841,23 +842,10 @@ fn render_tree(ui: &mut egui::Ui, nodes: &[TreeNode], app: &mut CatApp) {
     }
 }
 
-fn load_window_icon() -> Option<egui::IconData> {
-    let bytes = include_bytes!("../assets/mascot/cat_idle.png");
-    let image = image::load_from_memory(bytes).ok()?.to_rgba8();
-    let (width, height) = image.dimensions();
-    Some(egui::IconData { rgba: image.into_raw(), width, height })
-}
-
 #[cfg(windows)]
 pub fn run() -> Result<(), String> {
-    let mut viewport = egui::ViewportBuilder::default();
-    if let Some(icon) = load_window_icon() {
-        viewport = viewport.with_icon(icon);
-    }
-
     let native_options = eframe::NativeOptions {
         renderer: eframe::Renderer::Glow,
-        viewport,
         ..Default::default()
     };
     eframe::run_native(
@@ -876,6 +864,7 @@ pub fn run() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{app_name, drive_root};
+    use eframe::egui;
     #[test]
     fn identity_is_cat() {
         assert_eq!(app_name(), "Cat");
@@ -883,5 +872,100 @@ mod tests {
     #[test]
     fn has_drive_root() {
         assert!(!drive_root().as_os_str().is_empty());
+    }
+
+    // -------------------------------------------------------------------------
+    // Task 4 — Bug A exploration test
+    // -------------------------------------------------------------------------
+
+    /// Task 4 — Bug A exploration: highlight_code must highlight ALL keyword tokens
+    ///
+    /// Input "mut fn" contains two keywords. The unfixed O(n²) loop finds "fn" at
+    /// position 4, emits "mut " as plain base text (missing the "mut" keyword), then
+    /// highlights "fn". So "mut" is never keyword-coloured.
+    ///
+    /// EXPECTED OUTCOME on unfixed code: FAILS
+    ///   counterexample: "mut" span has base color, not keyword color
+    ///
+    /// Validates: Requirements 2.1, 2.2, 2.3
+    #[test]
+    fn highlight_code_keywords_in_prefix_are_highlighted() {
+        let job = super::highlight_code("mut fn");
+        let keyword_color = egui::Color32::from_rgb(251, 146, 60);
+
+        // Collect all text spans that have keyword color
+        let keyword_spans: Vec<&str> = job.sections.iter()
+            .filter(|s| s.format.color == keyword_color)
+            .map(|s| &job.text[s.byte_range.start.0..s.byte_range.end.0])
+            .collect();
+
+        assert!(
+            keyword_spans.contains(&"mut"),
+            "Bug A: 'mut' must be highlighted as a keyword on line 'mut fn'.\n\
+             Counterexample: keyword-coloured spans are {:?} — 'mut' is missing",
+            keyword_spans
+        );
+        assert!(
+            keyword_spans.contains(&"fn"),
+            "'fn' must also be highlighted as a keyword on line 'mut fn'.\n\
+             keyword-coloured spans are {:?}",
+            keyword_spans
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Task 5 — Bug A preservation tests
+    // -------------------------------------------------------------------------
+
+    /// Task 5 — Preservation: comment lines still render entirely in comment color
+    #[test]
+    fn highlight_code_preserves_comment_lines() {
+        let job = super::highlight_code("// this is a comment");
+        let comment_color = egui::Color32::from_rgb(107, 114, 128);
+        // Every non-empty span must be comment-colored
+        let non_comment: Vec<&str> = job.sections.iter()
+            .filter(|s| {
+                let text = &job.text[s.byte_range.start.0..s.byte_range.end.0];
+                s.format.color != comment_color && !text.trim().is_empty()
+            })
+            .map(|s| &job.text[s.byte_range.start.0..s.byte_range.end.0])
+            .collect();
+        assert!(
+            non_comment.is_empty(),
+            "All text in a comment line must be comment-colored. Non-comment spans: {:?}",
+            non_comment
+        );
+    }
+
+    /// Task 5 — Preservation: string literals still render in string color
+    #[test]
+    fn highlight_code_preserves_string_literals() {
+        let job = super::highlight_code("\"hello\"");
+        let string_color = egui::Color32::from_rgb(134, 224, 145);
+        let string_spans: Vec<&str> = job.sections.iter()
+            .filter(|s| s.format.color == string_color)
+            .map(|s| &job.text[s.byte_range.start.0..s.byte_range.end.0])
+            .collect();
+        assert!(
+            string_spans.iter().any(|s| s.contains("hello")),
+            "String content must be string-colored. String spans: {:?}",
+            string_spans
+        );
+    }
+
+    /// Task 5 — Preservation: number literals still render in number color
+    #[test]
+    fn highlight_code_preserves_number_literals() {
+        let job = super::highlight_code("123");
+        let number_color = egui::Color32::from_rgb(129, 178, 255);
+        let number_spans: Vec<&str> = job.sections.iter()
+            .filter(|s| s.format.color == number_color)
+            .map(|s| &job.text[s.byte_range.start.0..s.byte_range.end.0])
+            .collect();
+        assert!(
+            number_spans.iter().any(|s| s.contains("123")),
+            "Number literal must be number-colored. Number spans: {:?}",
+            number_spans
+        );
     }
 }

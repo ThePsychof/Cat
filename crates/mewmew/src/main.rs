@@ -21,7 +21,7 @@ struct Profile<'a> {
 }
 
 fn usage() {
-    eprintln!("Usage: mewmew init [drive-path] [--mode format|update|append] [--cat-binary path]");
+    eprintln!("Usage: mewmew init|update [drive-path] [--mode format|update|append] [--cat-binary path]");
 }
 
 fn main() {
@@ -33,12 +33,20 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let mut args = env::args().skip(1);
-    if args.next().as_deref() != Some("init") {
+    let command = args.next().ok_or_else(|| {
         usage();
-        return Err("expected the init command".into());
+        "expected the init or update command".to_string()
+    })?;
+    if command != "init" && command != "update" {
+        usage();
+        return Err(format!("unknown command: {command}"));
     }
     let mut drive = PathBuf::from(".");
-    let mut mode = "append".to_string();
+    let mut mode = if command == "update" {
+        "update".to_string()
+    } else {
+        "append".to_string()
+    };
     let mut cat_binary = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -68,8 +76,10 @@ fn run() -> Result<(), String> {
 }
 
 fn provision(drive: &Path, mode: &str, cat_binary: Option<&Path>) -> Result<(), String> {
-    fs::create_dir_all(drive)
-        .map_err(|e| format!("cannot access drive {}: {e}", drive.display()))?;
+    if !drive.exists() {
+        fs::create_dir_all(drive)
+            .map_err(|e| format!("cannot access drive {}: {e}", drive.display()))?;
+    }
     let repositories = drive.join("repositories");
     let profiles = drive.join("profiles");
     let metadata = drive.join(".cat");
@@ -122,13 +132,14 @@ fn brand_drive(drive: &Path, autorun_path: &Path) -> Result<(), String> {
     // The real persistent volume label (what "This PC" shows) is separate
     // from autorun.inf's label= line, which only affects some legacy
     // Explorer contexts. `label` is a cmd builtin, not a standalone exe.
-    let drive_letter = drive
-        .canonicalize()
-        .unwrap_or_else(|_| drive.to_path_buf())
-        .to_string_lossy()
-        .chars()
-        .take(2)
-        .collect::<String>();
+    let canonical = drive.canonicalize().unwrap_or_else(|_| drive.to_path_buf());
+    let canonical_str = canonical.to_string_lossy();
+    // canonicalize() on Windows prefixes paths with \\?\ (the verbatim-path
+    // marker) — e.g. "\\?\H:\" instead of plain "H:\". Strip that prefix
+    // before pulling out the drive letter, or the label command receives
+    // garbage instead of "H:".
+    let stripped = canonical_str.strip_prefix(r"\\?\").unwrap_or(&canonical_str);
+    let drive_letter: String = stripped.chars().take(2).collect();
 
     if !drive_letter.is_empty() {
         let _ = Command::new("cmd")

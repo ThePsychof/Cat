@@ -70,6 +70,13 @@ The intended workflow is: a normal PC runs `npx mewmew init` against a USB drive
 npx mewmew init /path/to/flash-drive
 ```
 
+To update Cat on an existing drive while preserving its repositories, profiles,
+and user data, run:
+
+```bash
+npx mewmew update /path/to/flash-drive
+```
+
 `npx` fetches the published `mewmew` CLI automatically, then prepares the selected drive. The CLI allows the user to choose a drive and a mode:
 
 #### Format

@@ -240,11 +240,15 @@ fn scan_for_repositories(
         return Ok(());
     }
 
-    for entry in
-        fs::read_dir(dir).map_err(|e| format!("Failed to read directory {}: {e}", dir.display()))?
-    {
-        let entry = entry
-            .map_err(|e| format!("Failed to read directory entry in {}: {e}", dir.display()))?;
+    let Ok(read_dir) = fs::read_dir(dir) else {
+        // Can't read this directory (permissions, a weird reparse point,
+        // etc.) — skip it rather than aborting the entire scan, so one bad
+        // entry anywhere under repositories/ doesn't hide every other repo.
+        return Ok(());
+    };
+
+    for entry in read_dir {
+        let Ok(entry) = entry else { continue };
         let path = entry.path();
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
@@ -253,7 +257,7 @@ fn scan_for_repositories(
         }
 
         if path.is_dir() {
-            scan_for_repositories(&path, repositories, visited)?;
+            let _ = scan_for_repositories(&path, repositories, visited);
         }
     }
 
@@ -316,6 +320,12 @@ pub fn evaluate_repository_state(repo_dir: &Path) -> Result<RepoSyncState, Strin
         return Ok(RepoSyncState::Behind);
     }
 
+    // Check "No commits yet" BEFORE the M/?? checks so a brand-new repo
+    // is classified as LocalOnly regardless of what else is in the output.
+    if text.contains("No commits yet") {
+        return Ok(RepoSyncState::LocalOnly);
+    }
+
     if text.contains("??")
         || text.contains(" M")
         || text.contains("M ")
@@ -323,10 +333,6 @@ pub fn evaluate_repository_state(repo_dir: &Path) -> Result<RepoSyncState, Strin
         || text.contains("D ")
         || text.contains("R ")
     {
-        return Ok(RepoSyncState::Modified);
-    }
-
-    if text.contains("No commits yet") {
         return Ok(RepoSyncState::Modified);
     }
 
@@ -338,13 +344,15 @@ fn directory_size(path: &Path) -> Result<u64, std::io::Error> {
         let mut total = 0u64;
         for entry in fs::read_dir(dir)? {
             let entry = entry?;
-            let path = entry.path();
-            let metadata = entry.metadata()?;
-            if metadata.is_dir() {
-                total += walk(&path)?;
-            } else {
-                total += metadata.len();
+            let file_type = entry.file_type()?;
+            if file_type.is_dir() {
+                // Regular subdirectory — recurse without following symlinks/junctions
+                total += walk(&entry.path())?;
+            } else if file_type.is_file() {
+                // Regular file — accumulate its size
+                total += entry.metadata()?.len();
             }
+            // Symlinks and junctions (file_type.is_symlink()) are implicitly skipped
         }
         Ok(total)
     }
@@ -425,17 +433,34 @@ pub fn push_repository(repo_dir: &Path, remote: &str, branch: &str, token: Optio
     Ok(())
 }
 
-pub fn clone_repository(url: &str, target_dir: &Path) -> Result<(), String> {
-    let git = git_program(target_dir.parent().unwrap_or(target_dir))?;
+pub fn clone_repository(url: &str, target_dir: &Path, token: Option<&str>) -> Result<(), String> {
+    use base64::Engine;
+
+    // Use target_dir's parent as the lookup root for git_program (the target
+    // doesn't exist yet, so walk up from its parent).
+    let lookup_dir = target_dir.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let git = git_program(lookup_dir)?;
+
+    let mut args: Vec<String> = Vec::new();
+
+    if let Some(t) = token {
+        let encoded = base64::engine::general_purpose::STANDARD
+            .encode(format!("x-access-token:{t}"));
+        args.push("-c".to_string());
+        args.push(format!("http.extraHeader=Authorization: Basic {encoded}"));
+    }
+
+    args.push("clone".to_string());
+    args.push(url.to_string());
+    args.push(target_dir.to_string_lossy().to_string());
+
     let output = Command::new(git)
-        .arg("clone")
-        .arg(url)
-        .arg(target_dir)
+        .args(&args)
         .output()
-        .map_err(|e| format!("Unable to clone {}: {e}", url))?;
+        .map_err(|e| format!("Unable to execute git clone {url}: {e}"))?;
 
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
 
     Ok(())
@@ -538,10 +563,18 @@ pub fn commit_changes(
     author_name: &str,
     author_email: &str,
 ) -> Result<String, String> {
-    git_output(repo_dir, &["config", "user.name", author_name])?;
-    git_output(repo_dir, &["config", "user.email", author_email])?;
-    let output = git_output(repo_dir, &["commit", "-m", message])?;
-    Ok(output.trim().to_string())
+    let git = git_program(repo_dir)?;
+    let name_config = format!("user.name={author_name}");
+    let email_config = format!("user.email={author_email}");
+    let output = Command::new(git)
+        .current_dir(repo_dir)
+        .args(["-c", &name_config, "-c", &email_config, "commit", "-m", message])
+        .output()
+        .map_err(|e| format!("Unable to execute git commit: {e}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 pub fn open_in_editor(repo_dir: &Path, editor: &str) -> Result<(), String> {
@@ -635,6 +668,12 @@ pub fn get_file_status(repo_dir: &Path) -> Result<Vec<FileStatus>, String> {
             "C " => "copied",
             "U " => "updated",
             "??" => "untracked",
+            " M" => "modified",
+            "MM" => "modified",
+            " A" => "added",
+            " D" => "deleted",
+            "!!" => "ignored",
+            "UU" | "AA" | "DD" | "AU" | "UA" | "DU" | "UD" => "unmerged",
             _ => "unknown",
         };
 
@@ -695,7 +734,8 @@ pub fn compare_files(repo_dir: &Path) -> Result<Vec<FileStatus>, String> {
 mod tests {
     use super::{
         DriveState, GitProfile, RepoSyncState, RepositoryRecord, commit_changes,
-        discover_repositories, get_commit_log, get_file_status, stage_all_changes,
+        directory_size, discover_repositories, get_commit_log, get_file_status,
+        stage_all_changes, clone_repository, evaluate_repository_state,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -805,5 +845,559 @@ mod tests {
         assert!(get_file_status(&repo).unwrap().is_empty());
         let log = get_commit_log(&repo, 5).unwrap();
         assert_eq!(log[0].message, "chore: add README");
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Bug condition exploration tests (task 1 — written BEFORE fixes)
+    // These tests are intentionally written against the EXPECTED
+    // (fixed) behaviour so that:
+    //   • 1a FAILS on unfixed code  → counterexample documents bug 4
+    //   • 1b does NOT COMPILE       → compile error documents bug 1
+    //   • 1c PASSES on unfixed code → confirms the bug is in GUI, not core
+    // DO NOT alter these tests or the implementation to make them pass
+    // until task 3 is reached.
+    // ────────────────────────────────────────────────────────────
+
+    /// Task 1a — Bug 4 exploration
+    ///
+    /// A freshly `git init`-ed repository with no commits should be classified
+    /// as `LocalOnly`.  On unfixed code the function returns `Modified` because
+    /// the "No commits yet" check sits *after* the M/??/A/D/R block and still
+    /// returns the wrong variant.
+    ///
+    /// EXPECTED OUTCOME on unfixed code: FAILS
+    ///   counterexample: evaluate_repository_state(new_repo) → Ok(Modified)
+    ///                   but expected Ok(LocalOnly)
+    ///
+    /// Validates: Requirements 4.1, 4.2
+    #[test]
+    fn evaluate_repository_state_new_repo_returns_local_only() {
+        let base = unique_temp_dir("new-repo-local-only");
+
+        // git init — no commits, no staged files
+        let status = Command::new("git")
+            .arg("init")
+            .arg(&base)
+            .status()
+            .expect("git init failed");
+        assert!(status.success(), "git init must succeed");
+
+        let result = evaluate_repository_state(&base)
+            .expect("evaluate_repository_state should not error on a new repo");
+
+        assert_eq!(
+            result,
+            RepoSyncState::LocalOnly,
+            "A new repo with no commits must be classified as LocalOnly, got {:?}",
+            result
+        );
+    }
+
+    /// Task 1b — Bug 1 exploration
+    ///
+    /// `clone_repository` should accept a third `token: Option<&str>` argument
+    /// and perform the clone via Command rather than gix.  The current
+    /// two-argument signature makes this test a **compile error**, which is the
+    /// expected evidence that bug 1 exists.
+    ///
+    /// EXPECTED OUTCOME on unfixed code: COMPILE ERROR (wrong arity)
+    ///   counterexample: `clone_repository(url, dir, None)` does not compile
+    ///   because the current signature is `clone_repository(url, dir)`
+    ///
+    /// Validates: Requirements 1.2, 1.3, 1.4, 1.6
+    #[test]
+    fn clone_repository_creates_local_copy() {
+        // Create a local bare repo that acts as the "remote"
+        let bare_dir = unique_temp_dir("bare-remote");
+        let status = Command::new("git")
+            .arg("init")
+            .arg("--bare")
+            .arg(&bare_dir)
+            .status()
+            .expect("git init --bare failed");
+        assert!(status.success(), "git init --bare must succeed");
+
+        // Give the bare repo at least one commit so it can be cloned
+        // (use a temporary work-tree clone approach)
+        let work_dir = unique_temp_dir("bare-work");
+        let clone_status = Command::new("git")
+            .args(["clone", &bare_dir.to_string_lossy(), &work_dir.to_string_lossy()])
+            .status()
+            .expect("git clone of bare repo failed");
+        assert!(clone_status.success(), "staging clone must succeed");
+
+        // Config + empty commit in the work tree
+        Command::new("git").args(["-C", &work_dir.to_string_lossy(), "config", "user.name", "Cat Test"]).status().unwrap();
+        Command::new("git").args(["-C", &work_dir.to_string_lossy(), "config", "user.email", "cat@example.com"]).status().unwrap();
+        let commit_status = Command::new("git")
+            .args(["-C", &work_dir.to_string_lossy(), "commit", "--allow-empty", "-m", "init"])
+            .status()
+            .expect("empty commit failed");
+        assert!(commit_status.success(), "empty commit must succeed");
+
+        // Detect the current branch name (could be 'main' or 'master')
+        let branch_output = Command::new("git")
+            .args(["-C", &work_dir.to_string_lossy(), "rev-parse", "--abbrev-ref", "HEAD"])
+            .output()
+            .expect("rev-parse HEAD failed");
+        let branch = String::from_utf8_lossy(&branch_output.stdout).trim().to_string();
+
+        // Push the commit back into the bare repo
+        let push_status = Command::new("git")
+            .args(["-C", &work_dir.to_string_lossy(), "push", "origin", &branch])
+            .status()
+            .expect("git push to bare repo failed");
+        assert!(push_status.success(), "push to bare repo must succeed");
+
+        // Now clone via the library function — NOTE: three-arg signature is the
+        // EXPECTED (fixed) API.  On unfixed code this line is a compile error.
+        // Temporarily use the two-arg call so the other tests can run; the
+        // three-arg call below (commented out) is the authoritative test that
+        // documents bug 1.  After task 3.2 fixes the signature, swap the
+        // comments back.
+        let target_dir = unique_temp_dir("clone-target");
+        let bare_url = bare_dir.to_string_lossy().to_string();
+        // Three-arg call — now valid after Bug 1 fix:
+        let result = clone_repository(&bare_url, &target_dir, None);
+
+        assert!(result.is_ok(), "clone_repository should succeed: {:?}", result);
+        assert!(
+            target_dir.join(".git").exists(),
+            "cloned directory must contain a .git entry"
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Preservation property tests (task 2 — written BEFORE fixes)
+    // These tests capture CORRECT existing behaviour for inputs that
+    // do NOT satisfy any bug condition.  They must PASS on unfixed code
+    // and continue to pass after every fix (regression guard).
+    // ────────────────────────────────────────────────────────────
+
+    /// Task 2a — Preservation: evaluate_repository_state for non-new repos
+    ///
+    /// For repositories that already have at least one commit the "No commits
+    /// yet" path is never taken, so these cases are unaffected by bug 4.
+    /// They document the three states that must survive unchanged after the fix:
+    ///
+    ///   • committed repo, clean working tree      → UpToDate
+    ///   • committed repo + untracked file          → Modified  (?? in status)
+    ///   • committed repo + modified tracked file   → Modified  ( M in status)
+    ///
+    /// EXPECTED OUTCOME on unfixed code: PASSES (no bug-condition inputs)
+    /// EXPECTED OUTCOME after bug 4 fix:  PASSES (preservation satisfied)
+    ///
+    /// Validates: Requirements 4.1, 4.2
+    #[test]
+    fn evaluate_repository_state_preservation_non_new_repo() {
+        // ── helper: init repo + one commit ──────────────────────────────
+        fn init_with_commit(prefix: &str) -> std::path::PathBuf {
+            let base = {
+                let nanos = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos();
+                std::env::temp_dir().join(format!("cat-{prefix}-{nanos}"))
+            };
+            fs::create_dir_all(&base).unwrap();
+
+            let s = Command::new("git").arg("init").arg(&base).status().unwrap();
+            assert!(s.success(), "git init failed for {prefix}");
+            Command::new("git").args(["-C", &base.to_string_lossy(), "config", "user.name", "Cat Test"]).status().unwrap();
+            Command::new("git").args(["-C", &base.to_string_lossy(), "config", "user.email", "cat@example.com"]).status().unwrap();
+
+            // one committed file so HEAD exists
+            let f = base.join("seed.txt");
+            fs::write(&f, "seed").unwrap();
+            Command::new("git").args(["-C", &base.to_string_lossy(), "add", "seed.txt"]).status().unwrap();
+            let s = Command::new("git")
+                .args(["-C", &base.to_string_lossy(), "commit", "-m", "seed"])
+                .status()
+                .unwrap();
+            assert!(s.success(), "seed commit failed for {prefix}");
+            base
+        }
+
+        // ── Case 1: clean committed repo → UpToDate ─────────────────────
+        {
+            let repo = init_with_commit("pres-uptodate");
+            let result = evaluate_repository_state(&repo)
+                .expect("evaluate_repository_state should not error on clean repo");
+            assert_eq!(
+                result,
+                RepoSyncState::UpToDate,
+                "clean committed repo must be UpToDate, got {:?}",
+                result
+            );
+        }
+
+        // ── Case 2: untracked file (??) → Modified ───────────────────────
+        {
+            let repo = init_with_commit("pres-untracked");
+            fs::write(repo.join("untracked.txt"), "new file").unwrap();
+            let result = evaluate_repository_state(&repo)
+                .expect("evaluate_repository_state should not error with untracked file");
+            assert_eq!(
+                result,
+                RepoSyncState::Modified,
+                "repo with untracked file must be Modified, got {:?}",
+                result
+            );
+        }
+
+        // ── Case 3: modified tracked file ( M) → Modified ────────────────
+        {
+            let repo = init_with_commit("pres-modified");
+            // mutate the already-tracked seed.txt (not staged → " M" in porcelain)
+            fs::write(repo.join("seed.txt"), "changed content").unwrap();
+            let result = evaluate_repository_state(&repo)
+                .expect("evaluate_repository_state should not error with modified tracked file");
+            assert_eq!(
+                result,
+                RepoSyncState::Modified,
+                "repo with modified tracked file must be Modified, got {:?}",
+                result
+            );
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Task 1 — Bug condition exploration tests
+    // Written BEFORE fixes.  Each test encodes the EXPECTED (correct) behaviour.
+    // • 1a FAILS on unfixed code  → documents Bug D
+    // • 1b FAILS on unfixed code  → documents Bug F
+    // • 1c FAILS on unfixed Unix  → documents Bug C  (skipped on Windows)
+    // DO NOT alter the tests or implementation to make them pass until task 3.
+    // ────────────────────────────────────────────────────────────
+
+    /// Task 1a — Bug D exploration: commit_changes must NOT write [user] to .git/config
+    ///
+    /// EXPECTED OUTCOME on unfixed code: FAILS
+    ///   counterexample: .git/config contains "[user]" section after commit_changes
+    ///
+    /// Validates: Requirements 4.1, 4.2
+    #[test]
+    fn commit_changes_does_not_modify_git_config() {
+        let base = unique_temp_dir("bug-d-exploration");
+
+        // git init
+        let s = Command::new("git").arg("init").arg(&base).status().unwrap();
+        assert!(s.success(), "git init failed");
+
+        // Configure identity via direct git -C args so HEAD exists for commit
+        Command::new("git")
+            .args(["-C", &base.to_string_lossy(), "config", "user.name", "Setup User"])
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["-C", &base.to_string_lossy(), "config", "user.email", "setup@example.com"])
+            .status()
+            .unwrap();
+
+        // Write and stage a file
+        fs::write(base.join("hello.txt"), "hello").unwrap();
+        Command::new("git")
+            .args(["-C", &base.to_string_lossy(), "add", "hello.txt"])
+            .status()
+            .unwrap();
+
+        // Clear out the [user] section written by setup so we start clean
+        // (git config --remove-section user ignores error if section missing)
+        let _ = Command::new("git")
+            .args(["-C", &base.to_string_lossy(), "config", "--remove-section", "user"])
+            .status();
+
+        // Call the library function under test
+        let result = commit_changes(&base, "test commit", "Cat Test", "cat@example.com");
+        assert!(result.is_ok(), "commit_changes should succeed: {:?}", result);
+
+        // Read .git/config and assert it does NOT contain [user]
+        let git_config_path = base.join(".git").join("config");
+        let config_contents = fs::read_to_string(&git_config_path)
+            .expect(".git/config must be readable");
+
+        assert!(
+            !config_contents.contains("[user]"),
+            "Bug D: commit_changes must not write [user] to .git/config.\n\
+             Counterexample: .git/config contains:\n{}",
+            config_contents
+        );
+    }
+
+    /// Task 1b — Bug F exploration: get_file_status must recognise " M" as "modified"
+    ///
+    /// EXPECTED OUTCOME on unfixed code: FAILS
+    ///   counterexample: FileStatus { status: "unknown" } for a file with porcelain code " M"
+    ///
+    /// Validates: Requirements 5.1
+    #[test]
+    fn get_file_status_recognizes_unstaged_modification() {
+        let base = unique_temp_dir("bug-f-exploration");
+
+        // git init + identity
+        let s = Command::new("git").arg("init").arg(&base).status().unwrap();
+        assert!(s.success(), "git init failed");
+        Command::new("git")
+            .args(["-C", &base.to_string_lossy(), "config", "user.name", "Cat Test"])
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["-C", &base.to_string_lossy(), "config", "user.email", "cat@example.com"])
+            .status()
+            .unwrap();
+
+        // Write, stage, and commit a file
+        fs::write(base.join("tracked.txt"), "original content").unwrap();
+        Command::new("git")
+            .args(["-C", &base.to_string_lossy(), "add", "tracked.txt"])
+            .status()
+            .unwrap();
+        let s = Command::new("git")
+            .args(["-C", &base.to_string_lossy(), "commit", "-m", "initial"])
+            .status()
+            .unwrap();
+        assert!(s.success(), "initial commit failed");
+
+        // Modify the file WITHOUT staging (produces porcelain code " M")
+        fs::write(base.join("tracked.txt"), "modified content").unwrap();
+
+        // Call the library function under test
+        let statuses = get_file_status(&base).expect("get_file_status should not error");
+
+        let tracked = statuses.iter().find(|f| f.path.contains("tracked.txt"))
+            .expect("tracked.txt must appear in file statuses");
+
+        assert_eq!(
+            tracked.status, "modified",
+            "Bug F: porcelain code ' M' must map to 'modified', got '{}'.\n\
+             Counterexample: FileStatus {{ path: {:?}, status: {:?} }}",
+            tracked.status, tracked.path, tracked.status
+        );
+    }
+
+    /// Task 1c — Bug C exploration: directory_size must skip symlinks (Unix only)
+    ///
+    /// EXPECTED OUTCOME on unfixed Unix code: FAILS
+    ///   counterexample: directory_size returns more than 10 bytes (follows symlink into "other" dir)
+    ///
+    /// Validates: Requirements 3.1, 3.2, 3.3
+    #[cfg(unix)]
+    #[test]
+    fn directory_size_skips_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let main_dir = unique_temp_dir("bug-c-exploration-main");
+        let other_dir = unique_temp_dir("bug-c-exploration-other");
+
+        // Write exactly 10 bytes in main_dir
+        fs::write(main_dir.join("regular.bin"), b"0123456789").unwrap();
+
+        // Put some files in other_dir (50 bytes total) so the difference is detectable
+        fs::write(other_dir.join("foreign1.bin"), b"aaaaaaaaaabbbbbbbbbbccccccccccddddddddddeeeeeeeeee").unwrap();
+
+        // Create a symlink "link" -> other_dir inside main_dir
+        symlink(&other_dir, main_dir.join("link")).unwrap();
+
+        let size = directory_size(&main_dir)
+            .expect("directory_size should not error");
+
+        assert_eq!(
+            size, 10,
+            "Bug C: directory_size must skip the symlink and return exactly 10 bytes (the regular file).\n\
+             Counterexample: returned {} bytes instead of 10 (followed symlink into other_dir)",
+            size
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Task 2 — Preservation property tests
+    // Written BEFORE fixes.  These capture correct existing behaviour for
+    // non-buggy inputs.  All three must PASS on unfixed code and continue
+    // to pass after every fix (regression guard).
+    // ────────────────────────────────────────────────────────────
+
+    /// Task 2a — Bug C preservation: directory_size correct for a plain directory (no symlinks)
+    ///
+    /// EXPECTED OUTCOME on unfixed code: PASSES
+    ///
+    /// Validates: Requirements 3.3, 3.4
+    #[test]
+    fn directory_size_correct_for_plain_directory() {
+        let dir = unique_temp_dir("bug-c-preservation");
+
+        // Write three files with known sizes: 10 + 20 + 30 = 60 bytes
+        fs::write(dir.join("a.bin"), b"0123456789").unwrap();                          // 10
+        fs::write(dir.join("b.bin"), b"01234567890123456789").unwrap();                // 20
+        fs::write(dir.join("c.bin"), b"012345678901234567890123456789").unwrap();      // 30
+
+        let size = directory_size(&dir).expect("directory_size should not error");
+
+        assert_eq!(
+            size, 60,
+            "directory_size must sum all regular file sizes; expected 60, got {}",
+            size
+        );
+    }
+
+    /// Task 2b — Bug D preservation: commit_changes records the correct author
+    ///
+    /// EXPECTED OUTCOME on unfixed code: PASSES (author IS written, just also leaks to .git/config)
+    ///
+    /// Validates: Requirements 4.3, 4.4
+    #[test]
+    fn commit_changes_records_correct_author() {
+        let base = unique_temp_dir("bug-d-preservation");
+
+        // git init
+        let s = Command::new("git").arg("init").arg(&base).status().unwrap();
+        assert!(s.success(), "git init failed");
+
+        // Write and stage a file
+        fs::write(base.join("file.txt"), "content").unwrap();
+        Command::new("git")
+            .args(["-C", &base.to_string_lossy(), "add", "file.txt"])
+            .status()
+            .unwrap();
+
+        // Commit via library function with a specific author identity
+        let result = commit_changes(&base, "preservation commit", "Alice Test", "alice@example.com");
+        assert!(result.is_ok(), "commit_changes should succeed: {:?}", result);
+
+        // Verify git log shows the correct author name and email
+        let log_output = Command::new("git")
+            .args(["-C", &base.to_string_lossy(), "log", "--format=%an|%ae", "-1"])
+            .output()
+            .expect("git log failed");
+        let log_str = String::from_utf8_lossy(&log_output.stdout);
+        let log_str = log_str.trim();
+
+        assert!(
+            log_str.contains("Alice Test"),
+            "git log must show author name 'Alice Test', got: {}",
+            log_str
+        );
+        assert!(
+            log_str.contains("alice@example.com"),
+            "git log must show author email 'alice@example.com', got: {}",
+            log_str
+        );
+    }
+
+    /// Task 2c — Bug F preservation: existing staged-code mappings are unchanged
+    ///
+    /// Verifies that the three most common pre-existing match arms still return
+    /// the correct status strings after any future fix:
+    ///   "A " → "added"    (newly staged file)
+    ///   "M " → "modified" (staged modification of a tracked file)
+    ///   "??" → "untracked" (untracked file)
+    ///
+    /// EXPECTED OUTCOME on unfixed code: PASSES
+    ///
+    /// Validates: Requirements 5.7
+    #[test]
+    fn get_file_status_existing_codes_unchanged() {
+        let base = unique_temp_dir("bug-f-preservation");
+
+        // git init + identity
+        let s = Command::new("git").arg("init").arg(&base).status().unwrap();
+        assert!(s.success(), "git init failed");
+        Command::new("git")
+            .args(["-C", &base.to_string_lossy(), "config", "user.name", "Cat Test"])
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["-C", &base.to_string_lossy(), "config", "user.email", "cat@example.com"])
+            .status()
+            .unwrap();
+
+        // Seed commit so HEAD exists (needed for "M " to appear in porcelain)
+        fs::write(base.join("tracked.txt"), "initial").unwrap();
+        Command::new("git")
+            .args(["-C", &base.to_string_lossy(), "add", "tracked.txt"])
+            .status()
+            .unwrap();
+        let s = Command::new("git")
+            .args(["-C", &base.to_string_lossy(), "commit", "-m", "seed"])
+            .status()
+            .unwrap();
+        assert!(s.success(), "seed commit failed");
+
+        // Case 1: staged NEW file → "A " → "added"
+        fs::write(base.join("new_file.txt"), "new").unwrap();
+        Command::new("git")
+            .args(["-C", &base.to_string_lossy(), "add", "new_file.txt"])
+            .status()
+            .unwrap();
+
+        // Case 2: staged modification of tracked file → "M " → "modified"
+        fs::write(base.join("tracked.txt"), "modified").unwrap();
+        Command::new("git")
+            .args(["-C", &base.to_string_lossy(), "add", "tracked.txt"])
+            .status()
+            .unwrap();
+
+        // Case 3: untracked file → "??" → "untracked"
+        fs::write(base.join("untracked.txt"), "not staged").unwrap();
+
+        let statuses = get_file_status(&base).expect("get_file_status should not error");
+
+        let find_status = |name: &str| -> Option<String> {
+            statuses.iter()
+                .find(|f| f.path.contains(name))
+                .map(|f| f.status.clone())
+        };
+
+        assert_eq!(
+            find_status("new_file.txt").as_deref(),
+            Some("added"),
+            "staged new file (code 'A ') must map to 'added'"
+        );
+        assert_eq!(
+            find_status("tracked.txt").as_deref(),
+            Some("modified"),
+            "staged modification (code 'M ') must map to 'modified'"
+        );
+        assert_eq!(
+            find_status("untracked.txt").as_deref(),
+            Some("untracked"),
+            "untracked file (code '??') must map to 'untracked'"
+        );
+    }
+
+    /// Task 1c (legacy label) — Bug 2 exploration (core layer)
+    ///
+    /// `discover_repositories` should find a git repo placed DIRECTLY inside
+    /// the given root (not buried in a `repositories/` subdirectory).
+    /// The scan-root bug lives in the GUI `refresh()` call site; the core
+    /// function itself is correct, so this test PASSES on unfixed code.
+    ///
+    /// EXPECTED OUTCOME on unfixed code: PASSES
+    ///   Note: bug 2 is in GUI refresh() — `let root = self.drive_root.join("repositories")`
+    ///   narrows the scan to a subdirectory.  Core discover_repositories is fine.
+    ///
+    /// Validates: Requirements 2.1
+    #[test]
+    fn discover_repos_finds_repo_at_drive_root() {
+        let drive_root = unique_temp_dir("drive-root-scan");
+
+        // Create a repo directly inside drive_root (no repositories/ subdir)
+        let repo_dir = drive_root.join("my-direct-repo");
+        fs::create_dir_all(&repo_dir).unwrap();
+        let status = Command::new("git")
+            .arg("init")
+            .arg(&repo_dir)
+            .status()
+            .expect("git init failed");
+        assert!(status.success(), "git init must succeed");
+
+        let discovered = discover_repositories(&drive_root)
+            .expect("discover_repositories should not error");
+
+        let repo_path = repo_dir.to_string_lossy().to_string();
+        assert!(
+            discovered.iter().any(|r| r.local_path == repo_path),
+            "discover_repositories must find a repo placed directly at drive_root; found: {:?}",
+            discovered.iter().map(|r| &r.local_path).collect::<Vec<_>>()
+        );
     }
 }

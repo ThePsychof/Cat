@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
-const version = "0.0.5";
+import { readFileSync } from "node:fs";
+const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf-8"));
+const version = pkg.version;
 const platform = process.platform === "win32" ? "windows" : process.platform === "darwin" ? "macos" : "linux";
 const asset = `mewmew-${platform}-${process.arch}${platform === "windows" ? ".exe" : ""}`;
 
@@ -113,10 +115,16 @@ async function binaryPath() {
   return destination;
 }
 
-if (process.argv[2] !== "init") throw new Error("Usage: npx mewmew init [drive-path] [--mode format|update|append]");
+const command = process.argv[2];
+if (command !== "init" && command !== "update") {
+  throw new Error("Usage: npx mewmew init|update [drive-path] [--mode format|update|append]");
+}
 const provisioner = await binaryPath();
 const folder = path.dirname(provisioner);
 const catName = platform === "windows" ? "Cat.exe" : "Cat";
 const catBinary = process.env.CAT_BINARY ?? await downloadAsset(folder, catName);
-const child = spawn(provisioner, [...process.argv.slice(2), "--cat-binary", catBinary], { stdio: "inherit" });
+const args = command === "update"
+  ? ["init", ...process.argv.slice(3), "--mode", "update"]
+  : process.argv.slice(2);
+const child = spawn(provisioner, [...args, "--cat-binary", catBinary], { stdio: "inherit" });
 child.on("exit", code => { process.exitCode = code ?? 1; });
