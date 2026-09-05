@@ -394,7 +394,7 @@ dependencies = [
 
 [[package]]
 name = "cat-core"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -407,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "cat-gui"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "cat-core",
  "eframe",
@@ -2001,7 +2001,7 @@ dependencies = [
 
 [[package]]
 name = "mewmew"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "serde",
  "serde_json",
