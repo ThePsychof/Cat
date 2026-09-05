@@ -18,10 +18,21 @@ pub fn app_name() -> &'static str {
 }
 
 pub fn drive_root() -> PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|path| path.parent().map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("."))
+    let Some(exe) = std::env::current_exe().ok() else {
+        return PathBuf::from(".");
+    };
+
+    let mut candidate = exe.parent();
+    while let Some(path) = candidate {
+        let metadata = path.join(".cat");
+        let cat_binary = path.join(if cfg!(windows) { "Cat.exe" } else { "Cat" });
+        if metadata.is_dir() && cat_binary.is_file() {
+            return path.to_path_buf();
+        }
+        candidate = path.parent();
+    }
+
+    exe.parent().map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."))
 }
 
 struct CatApp {
@@ -240,7 +251,16 @@ impl CatApp {
 
     fn refresh(&mut self) {
         let root = self.drive_root.clone();
-        self.repositories = discover_repositories(&root).unwrap_or_default();
+        match discover_repositories(&root) {
+            Ok(repositories) => {
+                self.repositories = repositories;
+                self.set_status("Repository list refreshed.", false);
+            }
+            Err(err) => {
+                self.set_status(format!("Couldn't scan {}: {err}", root.display()), true);
+                return;
+            }
+        }
         if self.selected_index >= self.repositories.len() {
             self.selected_index = self.repositories.len().saturating_sub(1);
         }
